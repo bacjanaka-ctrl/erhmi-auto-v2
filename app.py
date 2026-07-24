@@ -153,7 +153,7 @@ if uploaded_files:
         with st.status("🤖 Initiating AI Pipeline...", expanded=True) as status:
             try:
                 # --- STEP 1: ERHMIS SCHEMA FETCH ---
-                st.write("⏳ Step 1: Downloading dynamic form blueprint from ERHMIS...")
+                st.write("⏳ Step 1: connecting to ERHMIS...")
                 mat_res = requests.get(f"{BASE_URL}/dataSets/{selected_dataset_id}.json?fields=dataSetElements[dataElement[id,name,formName,categoryCombo[categoryOptionCombos[id,name]]]]", auth=st.session_state.auth, timeout=20)
                 
                 schema_buffer = io.StringIO()
@@ -172,7 +172,7 @@ if uploaded_files:
                 st.write("✅ Step 1 Complete.")
 
                 # --- STEP 2: AGGRESSIVE COMPRESSION ---
-                st.write("⏳ Step 2: Compressing photos for fast transmission...")
+                st.write("⏳ Step 2: photos transmission...")
                 image_parts = []
                 for f in uploaded_files:
                     img = Image.open(f)
@@ -190,7 +190,7 @@ if uploaded_files:
                 st.write("✅ Step 2 Complete.")
                 
                 # --- STEP 3: DUAL-CORE AI EXTRACTION ---
-                st.write("⏳ Step 3: AI is reading handwriting using Odd/Even Dual Engines...")
+                st.write("⏳ Step 3: AI is working...")
                 
                 # Dynamic Prompt Setup
                 month_names = ["January", "February", "March", "April", "May", "June", "July", "August", "September", "October", "November", "December"]
@@ -235,7 +235,7 @@ if uploaded_files:
                     genai.configure(api_key=api_key, transport="rest")
                     model = genai.GenerativeModel('gemini-3.5-flash')
                     contents = stack + [prompt]
-                    response = model.generate_content(contents, request_options={"timeout": 120})
+                    response = model.generate_content(contents, request_options={"timeout": 500})
                     return response.text.strip()
 
                 csv_odd = None
