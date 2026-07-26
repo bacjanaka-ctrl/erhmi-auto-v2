@@ -34,12 +34,10 @@ if "user_roles" not in st.session_state:
 # 🔒 ACCESS LIMITATION & SECURITY LAYER
 # ==========================================
 def check_authorization(username):
-    """Verifies if the user is explicitly authorized to use this platform."""
     try:
         authorized_list = st.secrets["security"]["AUTHORIZED_USERS"]
     except Exception:
         authorized_list = ["91-krw-sphi", "admin"]
-        
     return username.strip().lower() in [user.lower() for user in authorized_list]
 
 # --- LOGIN SCREEN ---
@@ -108,10 +106,19 @@ except Exception as e:
     st.stop()
 
 # --- STEP 2: USER META-DATA SELECTION ---
+# 🛑 FIXED: Using exactly "h631 part2" as requested
+report_type = st.selectbox(
+    "Select AI Reading Mode:", 
+    [
+        "PHI monthly report h631 part2 (12-Month Ledger)", 
+        "H1247 - Summary of School Medical Inspection (2-Page Form)"
+    ]
+)
+
 col1, col2 = st.columns(2)
 with col1:
     form_names = [f["name"] for f in available_forms]
-    selected_form_name = st.selectbox("📝 Target Form", form_names)
+    selected_form_name = st.selectbox("📝 Target Form Schema", form_names)
     selected_dataset_id = available_forms[form_names.index(selected_form_name)]["id"]
 
 with col2:
@@ -133,7 +140,7 @@ period = f"{year}{month}"
 st.write("---")
 st.subheader("📸 Form Image Ingestion")
 uploaded_files = st.file_uploader(
-    "Capture or upload monthly report sheets", 
+    "Capture or upload report sheets", 
     type=["jpg", "jpeg", "png"], 
     accept_multiple_files=True,
     help="Odd/Even Server routing is automatically enabled."
@@ -149,11 +156,10 @@ if uploaded_files:
 
     if st.button("✨ Extract Data via Dual-Core AI", type="primary", use_container_width=True):
         
-        # 🔄 Professional Status Animation Box
         with st.status("🤖 Initiating AI Pipeline...", expanded=True) as status:
             try:
                 # --- STEP 1: ERHMIS SCHEMA FETCH ---
-                st.write("⏳ Step 1: connecting to ERHMIS...")
+                st.write("⏳ Step 1: Downloading dynamic form blueprint from ERHMIS...")
                 mat_res = requests.get(f"{BASE_URL}/dataSets/{selected_dataset_id}.json?fields=dataSetElements[dataElement[id,name,formName,categoryCombo[categoryOptionCombos[id,name]]]]", auth=st.session_state.auth, timeout=20)
                 
                 schema_buffer = io.StringIO()
@@ -172,7 +178,7 @@ if uploaded_files:
                 st.write("✅ Step 1 Complete.")
 
                 # --- STEP 2: AGGRESSIVE COMPRESSION ---
-                st.write("⏳ Step 2: photos transmission...")
+                st.write("⏳ Step 2: Compressing photos for fast transmission...")
                 image_parts = []
                 for f in uploaded_files:
                     img = Image.open(f)
@@ -190,36 +196,47 @@ if uploaded_files:
                 st.write("✅ Step 2 Complete.")
                 
                 # --- STEP 3: DUAL-CORE AI EXTRACTION ---
-                st.write("⏳ Step 3: AI is working...")
+                st.write("⏳ Step 3: AI is reading handwriting using Odd/Even Dual Engines...")
                 
                 # Dynamic Prompt Setup
                 month_names = ["January", "February", "March", "April", "May", "June", "July", "August", "September", "October", "November", "December"]
-                month_letters = ["J", "F", "M", "A", "M", "J", "J", "A", "S", "O", "N", "D"]
                 month_idx = int(month) - 1
-                
                 target_month_name = month_names[month_idx]
-                target_month_num = str(int(month))
-                target_month_letter = month_letters[month_idx]
+
+                # 🛑 FIXED: Uses "h631" as the trigger to read it as a 12-month ledger
+                if "h631" in report_type.lower():
+                    month_letters = ["J", "F", "M", "A", "M", "J", "J", "A", "S", "O", "N", "D"]
+                    target_month_letter = month_letters[month_idx]
+                    target_month_num = str(int(month))
+                    
+                    form_layout_instructions = f"""
+                    HOW TO FIND THE COLUMN:
+                    Months are labeled with a SINGLE LETTER at the top of the columns (J, F, M, A, M, J, J, A, S, O, N, D).
+                    For {target_month_name}, look for the column labeled '{target_month_letter}'.
+                    Because some letters repeat, ensure accuracy: {target_month_name} is data column number {target_month_num} from left to right.
+                    """
+                else:
+                    form_layout_instructions = f"""
+                    HOW TO FIND THE DATA:
+                    This is a standard multi-page summary form (H1247) for the month of {target_month_name} {year}.
+                    It DOES NOT use a monthly grid. Scan the uploaded pages for fields that match the 'Field_Description' labels in the schema below.
+                    Extract the number written directly next to, below, or inside the box for that specific label.
+                    """
 
                 ai_prompt = f"""
                 Your task is to act as an expert data entry assistant for the Sri Lankan Ministry of Health.
                 
-                CRITICAL INSTRUCTION - TARGET MONTH: 
-                The images contain a ledger with data for multiple months. You MUST ONLY extract the data for {target_month_name} {year}. 
+                CRITICAL INSTRUCTION: 
+                You MUST ONLY extract the data for {target_month_name} {year}. Ignore obsolete data.
                 
-                HOW TO FIND THE COLUMN:
-                Months are labeled with a SINGLE LETTER at the top of the columns (J, F, M, A, M, J, J, A, S, O, N, D).
-                For {target_month_name}, look for the column labeled '{target_month_letter}'.
-                Because some letters repeat, ensure accuracy: {target_month_name} is data column number {target_month_num} from left to right.
-                
-                Look at the 'Field_Description' column in the schema below, match the correct data for {target_month_name} {year}, and type the extracted number into the 'Value' column.
+                {form_layout_instructions}
 
                 STRICT RULES:
                 1. Output STRICTLY as raw CSV text. No markdown blocks.
                 2. Keep DataElement_ID and Category_ID exactly as they appear.
                 3. Final output must have 4 columns: DataElement_ID, Category_ID, Field_Description, Value.
                 4. Do not omit any rows. Every row from the blueprint must be output.
-                5. If a field is explicitly blank or unreadable, leave the Value column completely blank. Do not write '0' unless written on the form.
+                5. If a field is explicitly blank, unreadable, or not found on the provided pages, leave the Value column completely blank. Do not write '0' unless written on the form.
 
                 SCHEMA MATRIX BLUEPRINT:
                 {schema_blueprint}
@@ -234,8 +251,18 @@ if uploaded_files:
                         return None
                     genai.configure(api_key=api_key, transport="rest")
                     model = genai.GenerativeModel('gemini-3.5-flash')
+                    
+                    generation_config = {
+                        "temperature": 0.0,
+                        "max_output_tokens": 8192
+                    }
+                    
                     contents = stack + [prompt]
-                    response = model.generate_content(contents, request_options={"timeout": 500})
+                    response = model.generate_content(
+                        contents, 
+                        generation_config=generation_config,
+                        request_options={"timeout": 120}
+                    )
                     return response.text.strip()
 
                 csv_odd = None
@@ -304,7 +331,6 @@ if "extracted_csv" in st.session_state:
 
     st.metric(label="Validated Populated Parameters", value=len(compiled_values))
     
-    # Transmission Button (CSV Download removed)
     if st.button("🚀 Push Mapped Records to Live ERHMIS"):
         
         if len(compiled_values) == 0:
@@ -333,7 +359,6 @@ if "extracted_csv" in st.session_state:
                     st.json(post_res.json())
                     
                     if post_res.status_code in [200, 201]:
-                        # Professional success alert instead of balloons
                         st.success(f"✨ Perfect Upload! Data is now live for {selected_clinic_name}.")
                         del st.session_state.extracted_csv
                         
