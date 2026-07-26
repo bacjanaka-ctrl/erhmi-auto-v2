@@ -10,13 +10,17 @@ import pandas as pd
 import numpy as np
 
 # --- PWA CONFIGURATION & MOBILE STYLING ---
-st.set_page_config(page_title="ERHMIS Core V2", page_icon="🚀", layout="centered")
+# 🛑 Name changed to eRHMIS Smart Upload
+st.set_page_config(page_title="eRHMIS Smart Upload", page_icon="🚀", layout="centered")
 
+# 🛑 CSS TRICK: Hides Streamlit's top menu, header logo, and footer to make it look professional
 st.markdown("""
     <style>
         .main { max-width: 700px; margin: 0 auto; }
         .stButton>button { width: 100%; border-radius: 8px; height: 3em; font-weight: bold; }
         .stTextInput>div>div>input { border-radius: 8px; }
+        #MainMenu {visibility: hidden;} 
+        header {visibility: hidden;} 
         footer {visibility: hidden;}
     </style>
 """, unsafe_allow_html=True)
@@ -42,7 +46,7 @@ def check_authorization(username):
 
 # --- LOGIN SCREEN ---
 if not st.session_state.authenticated:
-    st.title("🔐 ERHMIS Automation Portal V2")
+    st.title("🔐 eRHMIS Smart Upload")
     st.subheader("Authorized Personnel Only")
     
     with st.form("login_form"):
@@ -74,7 +78,7 @@ if not st.session_state.authenticated:
 # ==========================================
 # 🎛️ MAIN APPLICATION INTERFACE (AUTHENTICATED)
 # ==========================================
-st.title("🚀 ERHMIS Smart Upload (Dual-Core)")
+st.title("🚀 eRHMIS Smart Upload")
 st.caption(f"Logged in as: {st.session_state.username} | System Admin: {ADMIN_EMAIL}")
 
 if st.sidebar.button("Sign Out"):
@@ -106,14 +110,7 @@ except Exception as e:
     st.stop()
 
 # --- STEP 2: USER META-DATA SELECTION ---
-# 🛑 FIXED: Using exactly "h631 part2" as requested
-report_type = st.selectbox(
-    "Select AI Reading Mode:", 
-    [
-        "PHI monthly report h631 part2 (12-Month Ledger)", 
-        "H1247 - Summary of School Medical Inspection (2-Page Form)"
-    ]
-)
+# 🛑 FIXED: Extra manual dropdown removed. Logic is now fully automated based on Target Form.
 
 col1, col2 = st.columns(2)
 with col1:
@@ -203,8 +200,8 @@ if uploaded_files:
                 month_idx = int(month) - 1
                 target_month_name = month_names[month_idx]
 
-                # 🛑 FIXED: Uses "h631" as the trigger to read it as a 12-month ledger
-                if "h631" in report_type.lower():
+                # 🛑 FIXED: Automated logic based on Target Form Name
+                if "631" in selected_form_name.lower():
                     month_letters = ["J", "F", "M", "A", "M", "J", "J", "A", "S", "O", "N", "D"]
                     target_month_letter = month_letters[month_idx]
                     target_month_num = str(int(month))
@@ -218,7 +215,7 @@ if uploaded_files:
                 else:
                     form_layout_instructions = f"""
                     HOW TO FIND THE DATA:
-                    This is a standard multi-page summary form (H1247) for the month of {target_month_name} {year}.
+                    This is a standard multi-page summary form for the month of {target_month_name} {year}.
                     It DOES NOT use a monthly grid. Scan the uploaded pages for fields that match the 'Field_Description' labels in the schema below.
                     Extract the number written directly next to, below, or inside the box for that specific label.
                     """
