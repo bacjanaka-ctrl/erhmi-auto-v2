@@ -10,10 +10,8 @@ import pandas as pd
 import numpy as np
 
 # --- PWA CONFIGURATION & MOBILE STYLING ---
-# 🛑 Name changed to eRHMIS Smart Upload
 st.set_page_config(page_title="eRHMIS Smart Upload", page_icon="🚀", layout="centered")
 
-# 🛑 CSS TRICK: Hides Streamlit's top menu, header logo, and footer to make it look professional
 st.markdown("""
     <style>
         .main { max-width: 700px; margin: 0 auto; }
@@ -110,8 +108,6 @@ except Exception as e:
     st.stop()
 
 # --- STEP 2: USER META-DATA SELECTION ---
-# 🛑 FIXED: Extra manual dropdown removed. Logic is now fully automated based on Target Form.
-
 col1, col2 = st.columns(2)
 with col1:
     form_names = [f["name"] for f in available_forms]
@@ -123,13 +119,20 @@ with col2:
     selected_clinic_name = st.selectbox("🏥 PHI Area / Clinic", clinic_names)
     selected_ou_id = available_clinics[clinic_names.index(selected_clinic_name)]["id"]
 
+# 🛑 FIXED: Dynamic Date Selection Based on Form Type
+is_annual_form = "1247" in selected_form_name.lower()
+
 col3, col4 = st.columns(2)
 with col3:
     year = st.selectbox("📅 Year", ["2025", "2026", "2027"])
 with col4:
-    month = st.selectbox("📅 Month", [str(i).zfill(2) for i in range(1, 13)], format_func=lambda x: ["Jan","Feb","Mar","Apr","May","Jun","Jul","Aug","Sep","Oct","Nov","Dec"][int(x)-1])
-
-period = f"{year}{month}"
+    if is_annual_form:
+        st.info("📅 Annual Report")
+        month = None
+        period = year  # ERHMIS format for Yearly is just "YYYY"
+    else:
+        month = st.selectbox("📅 Month", [str(i).zfill(2) for i in range(1, 13)], format_func=lambda x: ["Jan","Feb","Mar","Apr","May","Jun","Jul","Aug","Sep","Oct","Nov","Dec"][int(x)-1])
+        period = f"{year}{month}"  # ERHMIS format for Monthly is "YYYYMM"
 
 # ==========================================
 # 🤖 AI PROCESSING PIPELINE
@@ -195,12 +198,16 @@ if uploaded_files:
                 # --- STEP 3: DUAL-CORE AI EXTRACTION ---
                 st.write("⏳ Step 3: AI is reading handwriting using Odd/Even Dual Engines...")
                 
-                # Dynamic Prompt Setup
-                month_names = ["January", "February", "March", "April", "May", "June", "July", "August", "September", "October", "November", "December"]
-                month_idx = int(month) - 1
-                target_month_name = month_names[month_idx]
+                # Dynamic Prompt Setup based on Annual vs Monthly
+                if is_annual_form:
+                    target_timeframe_text = f"the entire year of {year}"
+                else:
+                    month_names = ["January", "February", "March", "April", "May", "June", "July", "August", "September", "October", "November", "December"]
+                    month_idx = int(month) - 1
+                    target_month_name = month_names[month_idx]
+                    target_timeframe_text = f"{target_month_name} {year}"
 
-                # 🛑 FIXED: Automated logic based on Target Form Name
+                # Logic Branching based on Form Name
                 if "631" in selected_form_name.lower():
                     month_letters = ["J", "F", "M", "A", "M", "J", "J", "A", "S", "O", "N", "D"]
                     target_month_letter = month_letters[month_idx]
@@ -212,11 +219,18 @@ if uploaded_files:
                     For {target_month_name}, look for the column labeled '{target_month_letter}'.
                     Because some letters repeat, ensure accuracy: {target_month_name} is data column number {target_month_num} from left to right.
                     """
+                elif is_annual_form:
+                    form_layout_instructions = f"""
+                    HOW TO FIND THE DATA:
+                    This is a standard multi-page ANNUAL summary form for the YEAR {year}.
+                    It DOES NOT use a monthly grid. Scan the uploaded pages for fields that match the 'Field_Description' labels in the schema below.
+                    Extract the number written directly next to, below, or inside the box for that specific label.
+                    """
                 else:
                     form_layout_instructions = f"""
                     HOW TO FIND THE DATA:
-                    This is a standard multi-page summary form for the month of {target_month_name} {year}.
-                    It DOES NOT use a monthly grid. Scan the uploaded pages for fields that match the 'Field_Description' labels in the schema below.
+                    This is a standard multi-page summary form for {target_timeframe_text}.
+                    Scan the uploaded pages for fields that match the 'Field_Description' labels in the schema below.
                     Extract the number written directly next to, below, or inside the box for that specific label.
                     """
 
@@ -224,7 +238,7 @@ if uploaded_files:
                 Your task is to act as an expert data entry assistant for the Sri Lankan Ministry of Health.
                 
                 CRITICAL INSTRUCTION: 
-                You MUST ONLY extract the data for {target_month_name} {year}. Ignore obsolete data.
+                You MUST ONLY extract the data for {target_timeframe_text}. Ignore obsolete data.
                 
                 {form_layout_instructions}
 
