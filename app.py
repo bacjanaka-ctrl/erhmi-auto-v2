@@ -219,8 +219,8 @@ if uploaded_files:
     if st.button("✨ Extract Data via Dual-Core AI", type="primary", use_container_width=True):
         
         # PRE-CHECK: Ensure API keys are loaded before hitting the threads to avoid Metadata timeouts
-        api_key_1 = get_key("GEMINI_API_KEY_1")
-        api_key_2 = get_key("GEMINI_API_KEY_2")
+        api_key_1 = get_api_key("GEMINI_API_KEY_1")
+        api_key_2 = get_api_key("GEMINI_API_KEY_2")
         
         if not api_key_1 or not api_key_2:
             st.error("❌ CRITICAL ERROR: Streamlit API Keys are missing. Please check your st.secrets configuration.")
