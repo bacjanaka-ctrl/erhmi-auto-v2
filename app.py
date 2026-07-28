@@ -314,7 +314,7 @@ if uploaded_files:
                     response = model.generate_content(
                         contents, 
                         generation_config={"temperature": 0.0, "max_output_tokens": 8192},
-                        request_options={"timeout": 120}
+                        request_options={"timeout": 500}
                     )
                     return response.text.strip()
 
