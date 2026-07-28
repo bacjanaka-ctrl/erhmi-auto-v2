@@ -35,16 +35,64 @@ if "user_roles" not in st.session_state:
     st.session_state.user_roles = None
 
 # ==========================================
-# 🔒 HUGGING FACE SECURITY LAYER
+# 🧠 FORM CONFIGURATION LIBRARY (KNOWLEDGE BASE)
 # ==========================================
+FORM_CONFIGS = {
+    "631": {
+        "timeframe": "monthly",
+        "ai_instructions": """
+            HOW TO FIND THE DATA: 
+            This is a 12-month ledger. Months are labeled with a SINGLE LETTER at the top of the columns.
+            For {target_month_name}, look for the column labeled '{target_month_letter}'.
+            Because some letters repeat, ensure accuracy: {target_month_name} is data column number {target_month_num} from left to right.
+        """
+    },
+    "1247": {
+        "timeframe": "annual",
+        "ai_instructions": """
+            HOW TO FIND THE DATA (GRID FORMAT):
+            This is a multi-page ANNUAL summary form (H1247). 
+            Many sections (like Section 6) are formatted as a GRID. 
+            The rows represent conditions (e.g., "Stunting", "Wasting") and the columns represent Grade and Gender (e.g., Grade 1 M, Grade 4 F).
+            In the schema below, these grid intersections are represented as 'Condition ---> [Grade - Gender]'. 
+            You MUST carefully match the written number in the grid to the exact combination in the schema.
+        """
+    },
+    "default": {
+        "timeframe": "monthly",
+        "ai_instructions": """
+            HOW TO FIND THE DATA:
+            This is a standard multi-page summary form.
+            Scan the uploaded pages for fields that match the 'Field_Description' labels in the schema below.
+            Extract the number written directly next to, below, or inside the box for that specific label.
+        """
+    }
+}
+
+# ==========================================
+# 🔒 SECURE KEY MATCHER
+# ==========================================
+def get_api_key(key_name):
+    """Safely extracts API keys ensuring we don't trigger Google Metadata timeouts."""
+    try:
+        return st.secrets["ai"][key_name]
+    except Exception:
+        pass
+    try:
+        return st.secrets[key_name]
+    except Exception:
+        pass
+    return os.environ.get(key_name, None)
+
 def check_authorization(username):
     try:
-        auth_users_str = os.environ.get("AUTHORIZED_USERS", "91-krw-sphi,admin")
+        auth_users_str = get_api_key("AUTHORIZED_USERS") or "91-krw-sphi,admin"
         authorized_list = [u.strip() for u in auth_users_str.split(",")]
     except Exception:
         authorized_list = ["91-krw-sphi", "admin"]
     return username.strip().lower() in [user.lower() for user in authorized_list]
 
+# --- LOGIN SCREEN ---
 if not st.session_state.authenticated:
     st.title("🔐 eRHMIS Smart Upload")
     st.subheader("Authorized Personnel Only")
@@ -57,7 +105,7 @@ if not st.session_state.authenticated:
         submit_login = st.form_submit_button("Secure Log In")
         
         if submit_login:
-            master_token = os.environ.get("MASTER_TOKEN", "fallback_token")
+            master_token = get_api_key("MASTER_TOKEN") or "fallback_token"
             
             if not check_authorization(username) and app_passcode != master_token:
                 st.error(f"❌ Access Denied. Your account is not whitelisted. Please contact {ADMIN_EMAIL}.")
@@ -121,11 +169,19 @@ with col2:
     selected_clinic_name = st.selectbox("🏥 PHI Area / Clinic", clinic_names)
     selected_ou_id = available_clinics[clinic_names.index(selected_clinic_name)]["id"]
 
-is_annual_form = "1247" in selected_form_name.lower()
+# --- DYNAMIC FORM CONFIGURATION ROUTER ---
+form_key = "default"
+for key in FORM_CONFIGS.keys():
+    if key != "default" and key in selected_form_name.lower():
+        form_key = key
+        break
+
+current_config = FORM_CONFIGS[form_key]
+is_annual_form = (current_config["timeframe"] == "annual")
 
 col3, col4 = st.columns(2)
 with col3:
-    year = st.selectbox("📅 Year", ["2025", "2026", "2027"])
+    year = st.selectbox("📅 Year", ["2025", "2026", "2027", "2028"])
 with col4:
     if is_annual_form:
         st.info("📅 Annual Report")
@@ -146,7 +202,6 @@ uploaded_files = st.file_uploader(
     accept_multiple_files=True
 )
 
-# HELPER FUNCTION: Cleans messy AI outputs before Pandas reads them
 def clean_ai_csv(raw_text):
     cleaned = raw_text.replace("```csv", "").replace("```", "").strip()
     if "DataElement_ID" not in cleaned:
@@ -163,13 +218,20 @@ if uploaded_files:
 
     if st.button("✨ Extract Data via Dual-Core AI", type="primary", use_container_width=True):
         
+        # PRE-CHECK: Ensure API keys are loaded before hitting the threads to avoid Metadata timeouts
+        api_key_1 = get_key("GEMINI_API_KEY_1")
+        api_key_2 = get_key("GEMINI_API_KEY_2")
+        
+        if not api_key_1 or not api_key_2:
+            st.error("❌ CRITICAL ERROR: Streamlit API Keys are missing. Please check your st.secrets configuration.")
+            st.stop()
+
         with st.status("🤖 Initiating AI Pipeline...", expanded=True) as status:
             try:
                 # --- STEP 1: SCHEMA FETCH ---
                 st.write("⏳ Step 1: Downloading dynamic form blueprint...")
                 mat_res = requests.get(f"{BASE_URL}/dataSets/{selected_dataset_id}.json?fields=dataSetElements[dataElement[id,name,formName,categoryCombo[categoryOptionCombos[id,name]]]]", auth=st.session_state.auth, timeout=20)
                 
-                # Use QUOTE_MINIMAL to protect against commas inside the Field_Description
                 schema_buffer = io.StringIO()
                 writer = csv.writer(schema_buffer, quoting=csv.QUOTE_MINIMAL)
                 writer.writerow(["DataElement_ID", "Category_ID", "Field_Description", "Value"])
@@ -205,40 +267,31 @@ if uploaded_files:
                 # --- STEP 3: DUAL-CORE EXTRACTION ---
                 st.write("⏳ Step 3: AI is reading handwriting...")
                 
+                # Format timeframes dynamically
                 if is_annual_form:
                     target_timeframe_text = f"the entire year of {year}"
+                    month_context = {}
                 else:
                     month_names = ["January", "February", "March", "April", "May", "June", "July", "August", "September", "October", "November", "December"]
-                    month_idx = int(month) - 1
-                    target_month_name = month_names[month_idx]
-                    target_timeframe_text = f"{target_month_name} {year}"
-
-                if "631" in selected_form_name.lower():
                     month_letters = ["J", "F", "M", "A", "M", "J", "J", "A", "S", "O", "N", "D"]
-                    target_month_letter = month_letters[month_idx]
-                    target_month_num = str(int(month))
-                    form_layout_instructions = f"""
-                    HOW TO FIND THE COLUMN:
-                    Months are labeled with a SINGLE LETTER at the top of the columns.
-                    For {target_month_name}, look for the column labeled '{target_month_letter}' (Column #{target_month_num} from left to right).
-                    """
-                elif is_annual_form:
-                    form_layout_instructions = f"""
-                    HOW TO FIND THE DATA (GRID FORMAT):
-                    This is a multi-page ANNUAL summary form (H1247). 
-                    Many sections (like Section 6) are formatted as a GRID. 
-                    The rows represent conditions (e.g., "Stunting", "Wasting") and the columns represent Grade and Gender (e.g., Grade 1 M, Grade 4 F).
-                    In the schema below, these grid intersections are represented as 'Condition ---> [Grade - Gender]'. 
-                    You MUST carefully match the written number in the grid to the exact combination in the schema.
-                    """
-                else:
-                    form_layout_instructions = f"Extract numbers matching the schema descriptions."
+                    month_idx = int(month) - 1
+                    
+                    target_timeframe_text = f"{month_names[month_idx]} {year}"
+                    month_context = {
+                        "target_month_name": month_names[month_idx],
+                        "target_month_letter": month_letters[month_idx],
+                        "target_month_num": str(int(month))
+                    }
 
+                # Format the specific instructions from the Library
+                specific_instructions = current_config["ai_instructions"].format(**month_context)
+
+                # Assemble Final Master Prompt
                 ai_prompt = f"""
                 You are an expert data entry assistant for the Sri Lankan Ministry of Health.
                 CRITICAL INSTRUCTION: You MUST ONLY extract the data for {target_timeframe_text}.
                 
-                {form_layout_instructions}
+                {specific_instructions}
 
                 STRICT RULES:
                 1. Output STRICTLY as raw CSV text. No markdown blocks (do not use ```csv).
@@ -261,12 +314,9 @@ if uploaded_files:
                     response = model.generate_content(
                         contents, 
                         generation_config={"temperature": 0.0, "max_output_tokens": 8192},
-                        request_options={"timeout": 240}
+                        request_options={"timeout": 120}
                     )
                     return response.text.strip()
-
-                api_key_1 = os.environ.get("GEMINI_API_KEY_1")
-                api_key_2 = os.environ.get("GEMINI_API_KEY_2")
 
                 with concurrent.futures.ThreadPoolExecutor() as executor:
                     future_odd = executor.submit(process_stack, stack_odd, api_key_1, ai_prompt)
@@ -274,7 +324,6 @@ if uploaded_files:
                     csv_odd = future_odd.result()
                     csv_even = future_even.result()
 
-                # --- NEW FAULT-TOLERANT MERGE ENGINE ---
                 dfs = []
                 if csv_odd:
                     try:
@@ -290,14 +339,12 @@ if uploaded_files:
                 if dfs:
                     df_final = pd.concat(dfs, ignore_index=True)
                     
-                    # Ensure columns exist even if AI forgot them
                     if 'Value' not in df_final.columns:
                         df_final['Value'] = np.nan
                     
                     df_final['Value'] = df_final['Value'].replace(r'^\s*$', np.nan, regex=True)
-                    df_final = df_final.dropna(subset=['Value']) # Drop rows that AI accidentally included as blank
+                    df_final = df_final.dropna(subset=['Value'])
                     
-                    # Deduplicate in case both engines found the same row
                     if 'DataElement_ID' in df_final.columns and 'Category_ID' in df_final.columns:
                         df_final = df_final.drop_duplicates(subset=['DataElement_ID', 'Category_ID'], keep='first')
                     
