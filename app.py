@@ -53,51 +53,25 @@ FORM_CONFIGS = {
         "processing_mode": "single_bundle", 
         "ai_instructions": """
             CRITICAL VISUAL MAPPING CHEAT SHEET FOR FORM H1247:
-            You must map the physical row numbers on the paper to the schema exactly as defined below. Do not guess.
+            You must extract EVERY SINGLE handwritten number or checkmark from the form. Do NOT ignore any filled box.
             
             0. SYMBOLS: 
                - Checkmark / Tick (✓) = 1
                - Dash (-) or empty box = BLANK (Do NOT output)
                
-            1. SECTION 3 (Officers participated):
-               Look at the printed numbers 1 to 11 on the paper. Map handwritten values ONLY to these specific labels:
-               Row 1 = MOH
-               Row 2 = AMOH
-               Row 3 = Other MOs
-               Row 4 = Dental Surgeon
-               Row 5 = RMO/AMO
-               Row 6 = SPHI
-               Row 7 = PHI
-               Row 8 = PHNS
-               Row 9 = HEO
-               Row 10 = SDT
-               Row 11 = PHM
-               * Example: If a '1' is written on Row 7, it belongs ONLY to 'PHI'. Do not put 1 for AMOH.
+            1. TOP TABLE ('No. of Children' / Grade 1 to 13 & Other):
+               - Columns labeled (1) through (13) correspond to Grade 1 through Grade 13. Column (14) is 'Other'.
+               - Extract EVERY handwritten number here (Male, Female, and Total rows) and match it to the corresponding schema label.
                
-            2. SECTION 4 (Students examined):
-               Map the physical rows on the paper to these exact grades:
-               Row 1 = Grade 1
-               Row 2 = Grade 4
-               Row 3 = Grade 7
-               Row 4 = Grade 10
-               Row 5 = Other
+            2. SECTION 3 (Officers participated):
+               - Map the printed numbers exactly: 1=MOH, 2=AMOH, 3=Other MOs, 4=Dental Surgeon, 5=RMO/AMO, 6=SPHI, 7=PHI, 8=PHNS, 9=HEO, 10=SDT, 11=PHM.
+               - If a '1' is written on Row 7, it belongs ONLY to 'PHI'.
                
-            3. SECTION 6 (Problems & Defects Matrix):
-               The grid columns strictly correspond to:
-               Col 1 = Grade 1 (Male)
-               Col 2 = Grade 1 (Female)
-               Col 3 = Grade 4 (Male)
-               Col 4 = Grade 4 (Female)
-               Col 5 = Grade 7 (Male)
-               Col 6 = Grade 7 (Female)
-               Col 7 = Grade 10 (Male)
-               Col 8 = Grade 10 (Female)
-               Col 9 = Other (Male)
-               Col 10 = Other (Female)
-               * Trace carefully! If a '1' is in Row 2 (Wasting) and Column 3, map it to 'Wasting ---> [Grade 4 - Male]'.
-               
-            4. PAGE 2 'NIL':
-               If 'NIL' or a large line is drawn across a page, ignore all fields on that page.
+            3. SECTIONS 4 & 6 (Grades Matrix):
+               - Columns are strictly paired by Gender: Grade 1 (M), Grade 1 (F), Grade 4 (M), Grade 4 (F), Grade 7 (M), Grade 7 (F), Grade 10 (M), Grade 10 (F), Other (M), Other (F).
+               - Trace carefully! Example: A '1' in Row 2 ('Wasting') under Column 3 ('Grade 4 M') maps to 'Wasting ---> [Grade 4 - Male]'.
+
+            WARNING: Find the matching 11-character Schema IDs for EVERY number you see on the page. Do NOT skip the top table.
         """
     },
     "default": {
@@ -226,9 +200,14 @@ with col3:
     year = st.selectbox("📅 Year", ["2025", "2026", "2027", "2028"])
 with col4:
     if is_annual_form:
-        st.info("📅 Annual Report")
-        month = None
-        period = year
+        override_monthly = st.checkbox("Force Monthly Format (Check if ERHMIS rejects upload)")
+        if override_monthly:
+            month = st.selectbox("📅 Month", [str(i).zfill(2) for i in range(1, 13)], format_func=lambda x: ["Jan","Feb","Mar","Apr","May","Jun","Jul","Aug","Sep","Oct","Nov","Dec"][int(x)-1])
+            period = f"{year}{month}"
+        else:
+            st.info("📅 Annual Report")
+            month = None
+            period = year
     else:
         month = st.selectbox("📅 Month", [str(i).zfill(2) for i in range(1, 13)], format_func=lambda x: ["Jan","Feb","Mar","Apr","May","Jun","Jul","Aug","Sep","Oct","Nov","Dec"][int(x)-1])
         period = f"{year}{month}"
@@ -333,9 +312,9 @@ if uploaded_files:
 
                 STRICT RULES:
                 1. Output STRICTLY as raw CSV text. No markdown blocks (do not use ```csv).
-                2. The output MUST contain exactly 4 columns separated by commas. The first row MUST be exactly: DataElement_ID,Category_ID,Field_Description,Value
-                3. OMIT BLANKS: ONLY output rows where you found a visible handwritten number or checkmark on the assigned pages. If a field is explicitly blank, DO NOT include that row in your output.
-                4. Do NOT hallucinate or copy values across empty rows.
+                2. The output MUST contain exactly 4 columns separated by commas. 
+                3. STRICT ID MATCHING: The 'DataElement_ID' and 'Category_ID' must be the exact 11-character codes pulled directly from the Schema Blueprint below. NEVER invent your own ID strings.
+                4. OMIT BLANKS: ONLY output rows where you found a visible handwritten number or checkmark on the assigned pages. 
 
                 SCHEMA BLUEPRINT (Use this to match IDs):
                 {schema_blueprint}
@@ -344,7 +323,6 @@ if uploaded_files:
                 def process_stack(stack, api_key, prompt):
                     if not stack: return None
                     genai.configure(api_key=api_key, transport="rest")
-                    # Using gemini-1.5-flash as the fast, standard tier for document processing
                     model = genai.GenerativeModel('gemini-3.5-flash')
                     contents = stack + [prompt]
                     response = model.generate_content(
@@ -415,7 +393,8 @@ if "extracted_csv" in st.session_state:
         parts = line.split(',')
         if len(parts) >= 4 and parts[0] != "DataElement_ID":
             de_id, cat_id, val = parts[0].strip(), parts[1].strip(), parts[-1].strip()
-            if val and val != "Value":
+            # Strict length validation ensures we don't upload AI hallucinations
+            if len(de_id) >= 10 and len(cat_id) >= 10 and val and val != "Value":
                 try:
                     clean_val = str(int(float(val)))
                     compiled_values.append({
@@ -447,13 +426,34 @@ if "extracted_csv" in st.session_state:
                         timeout=45
                     )
                     st.write("✅ Step 4 Complete.")
-                    upload_status.update(label="✅ Transmission Successful", state="complete", expanded=False)
+                    upload_status.update(label="✅ Transmission Checked", state="complete", expanded=False)
                     st.subheader("🎉 Server Transaction Summary:")
-                    st.json(post_res.json())
+                    
+                    res_json = post_res.json()
+                    st.json(res_json)
                     
                     if post_res.status_code in [200, 201]:
-                        st.success(f"✨ Perfect Upload! Data is now live for {selected_clinic_name}.")
-                        del st.session_state.extracted_csv
+                        # Intelligent Import Summary Parsing to catch ERHMIS rejections
+                        imported = 0
+                        ignored = 0
+                        if "response" in res_json and "importCount" in res_json["response"]:
+                            imported = res_json["response"]["importCount"].get("imported", 0)
+                            ignored = res_json["response"]["importCount"].get("ignored", 0)
+                        elif "importCount" in res_json:
+                            imported = res_json["importCount"].get("imported", 0)
+                            ignored = res_json["importCount"].get("ignored", 0)
+
+                        if ignored > 0 and imported == 0:
+                            st.error(f"❌ ERHMIS REJECTED THE DATA! (Ignored: {ignored})")
+                            st.warning("⚠️ ERHMIS refused to save the data. This usually means the 'Period' (Yearly vs Monthly) is incorrect for this form. Try checking the 'Force Monthly Format' box above!")
+                        elif ignored > 0:
+                            st.warning(f"⚠️ Partial Upload! Imported: {imported}, Ignored: {ignored}")
+                            st.success(f"✨ Data is live for {selected_clinic_name}, but some records were rejected.")
+                            del st.session_state.extracted_csv
+                        else:
+                            st.success(f"✨ Perfect Upload! {imported} records are now live for {selected_clinic_name}.")
+                            del st.session_state.extracted_csv
+                            
                 except requests.exceptions.Timeout:
                     st.error("❌ Transmission timed out. The server acknowledged the payload but took too long.")
                 except Exception as e:
