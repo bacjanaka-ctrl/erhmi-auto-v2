@@ -40,6 +40,7 @@ if "user_roles" not in st.session_state:
 FORM_CONFIGS = {
     "631": {
         "timeframe": "monthly",
+        "processing_mode": "dual_interleave", # Split odd/even for 16-page ledgers
         "ai_instructions": """
             HOW TO FIND THE DATA: 
             This is a 12-month ledger. Months are labeled with a SINGLE LETTER at the top of the columns.
@@ -49,20 +50,41 @@ FORM_CONFIGS = {
     },
     "1247": {
         "timeframe": "annual",
+        "processing_mode": "single_bundle", # Process all 2 pages together in ONE call
         "ai_instructions": """
-            HOW TO FIND THE DATA (GRID FORMAT):
-            This is a multi-page ANNUAL summary form (H1247). 
-            Many sections (like Section 6) are formatted as a GRID. 
-            The rows represent conditions (e.g., "Stunting", "Wasting") and the columns represent Grade and Gender (e.g., Grade 1 M, Grade 4 F).
-            In the schema below, these grid intersections are represented as 'Condition ---> [Grade - Gender]'. 
-            You MUST carefully match the written number in the grid to the exact combination in the schema.
+            CRITICAL VISUAL LAYOUT RULES FOR FORM H1247:
+            
+            1. TOP TABLE (Grade 1 to 13 & Other):
+               - Columns labeled (1) to (13) correspond strictly to Grade 1 through Grade 13.
+               - A dash ('-') or empty box means BLANK. Do NOT output a value if a box has a dash or is empty.
+               - Only extract handwritten digits (e.g., '02' = 2).
+               
+            2. SECTION 2 (Whether screened by PHI):
+               - Checkmarks (✓) in checkboxes mean 'Yes' or 'No'. Do NOT convert tick marks into numeric '1's for other numeric fields!
+               
+            3. SECTION 3 (No. of officers participated):
+               - This section has 11 numbered rows: 1.MOH, 2.AMOH, 3.Other MOs, 4.Dental Surgeon, 5.RMO/AMO, 6.SPHI, 7.PHI, 8.PHNS, 9.HEO, 10.SDT, 11.PHM.
+               - STRICT MATCHING: Only output data for a row if a handwritten number is written directly next to THAT SPECIFIC ROW NUMBER. 
+               - Example: If '1' is written on Row 7 (PHI) and all other rows are empty, ONLY output Row 7 as 1. Do NOT put 1 into AMOH, HEO, SDT, or PHM!
+               
+            4. SECTION 4 (No. of students examined):
+               - Contains 5 distinct blocks: 'Grade 1', 'Grade 4', 'Grade 7', 'Grade 10', 'Other'.
+               - DO NOT SHIFT VALUES UPWARD! If Grade 1 is blank on paper, leave Grade 1 completely BLANK in the output. If numbers are written in Grade 4, output them ONLY under Grade 4.
+               
+            5. SECTION 6 (Problems & Defects Detected Grid):
+               - Rows represent defect conditions. Columns represent Grade 1 (M/F), Grade 4 (M/F), Grade 7 (M/F), Grade 10 (M/F), Other (M/F).
+               - Carefully locate the exact grid cell where a number is written.
+               
+            6. PAGE 2 DIAGONAL LINE / 'NIL':
+               - If a large diagonal line or 'NIL' is drawn across Page 2, ALL items covered by that line are BLANK. Output NO rows for those items.
         """
     },
     "default": {
         "timeframe": "monthly",
+        "processing_mode": "single_bundle",
         "ai_instructions": """
             HOW TO FIND THE DATA:
-            This is a standard multi-page summary form.
+            This is a standard summary form.
             Scan the uploaded pages for fields that match the 'Field_Description' labels in the schema below.
             Extract the number written directly next to, below, or inside the box for that specific label.
         """
@@ -73,7 +95,6 @@ FORM_CONFIGS = {
 # 🔒 SECURE KEY MATCHER
 # ==========================================
 def get_api_key(key_name):
-    """Safely extracts API keys ensuring we don't trigger Google Metadata timeouts."""
     try:
         return st.secrets["ai"][key_name]
     except Exception:
@@ -218,7 +239,6 @@ if uploaded_files:
 
     if st.button("✨ Extract Data via Dual-Core AI", type="primary", use_container_width=True):
         
-        # PRE-CHECK: Ensure API keys are loaded before hitting the threads to avoid Metadata timeouts
         api_key_1 = get_api_key("GEMINI_API_KEY_1")
         api_key_2 = get_api_key("GEMINI_API_KEY_2")
         
@@ -264,10 +284,9 @@ if uploaded_files:
                     gc.collect()
                 st.write("✅ Step 2 Complete.")
                 
-                # --- STEP 3: DUAL-CORE EXTRACTION ---
+                # --- STEP 3: AI EXTRACTION ENGINE ROUTER ---
                 st.write("⏳ Step 3: AI is reading handwriting...")
                 
-                # Format timeframes dynamically
                 if is_annual_form:
                     target_timeframe_text = f"the entire year of {year}"
                     month_context = {}
@@ -283,10 +302,8 @@ if uploaded_files:
                         "target_month_num": str(int(month))
                     }
 
-                # Format the specific instructions from the Library
                 specific_instructions = current_config["ai_instructions"].format(**month_context)
 
-                # Assemble Final Master Prompt
                 ai_prompt = f"""
                 You are an expert data entry assistant for the Sri Lankan Ministry of Health.
                 CRITICAL INSTRUCTION: You MUST ONLY extract the data for {target_timeframe_text}.
@@ -296,15 +313,12 @@ if uploaded_files:
                 STRICT RULES:
                 1. Output STRICTLY as raw CSV text. No markdown blocks (do not use ```csv).
                 2. The output MUST contain exactly 4 columns separated by commas. The first row MUST be exactly: DataElement_ID,Category_ID,Field_Description,Value
-                3. OMIT BLANKS: ONLY output rows where you found a visible number on the assigned pages. If a field is blank, DO NOT include that row in your output.
-                4. NIL RULE: If a large "NIL" or line is drawn across a whole page or section, DO NOT output any data for that section.
+                3. OMIT BLANKS: ONLY output rows where you found a visible handwritten number on the assigned pages. If a field is blank or has a dash ('-'), DO NOT include that row in your output.
+                4. Do NOT hallucinate or copy values across empty rows.
 
                 SCHEMA BLUEPRINT (Use this to match IDs):
                 {schema_blueprint}
                 """
-
-                stack_odd = image_parts[0::2]
-                stack_even = image_parts[1::2]
 
                 def process_stack(stack, api_key, prompt):
                     if not stack: return None
@@ -314,27 +328,34 @@ if uploaded_files:
                     response = model.generate_content(
                         contents, 
                         generation_config={"temperature": 0.0, "max_output_tokens": 8192},
-                        request_options={"timeout": 500}
+                        request_options={"timeout": 120}
                     )
                     return response.text.strip()
 
-                with concurrent.futures.ThreadPoolExecutor() as executor:
-                    future_odd = executor.submit(process_stack, stack_odd, api_key_1, ai_prompt)
-                    future_even = executor.submit(process_stack, stack_even, api_key_2, ai_prompt)
-                    csv_odd = future_odd.result()
-                    csv_even = future_even.result()
-
+                # ROUTING: Interleaved (H631) vs Single Bundle (H1247)
+                mode = current_config.get("processing_mode", "single_bundle")
+                
                 dfs = []
-                if csv_odd:
-                    try:
-                        dfs.append(pd.read_csv(io.StringIO(clean_ai_csv(csv_odd)), on_bad_lines='skip'))
-                    except Exception as e:
-                        st.warning(f"Engine A Warning: Could not parse some rows.")
-                if csv_even:
-                    try:
-                        dfs.append(pd.read_csv(io.StringIO(clean_ai_csv(csv_even)), on_bad_lines='skip'))
-                    except Exception as e:
-                        st.warning(f"Engine B Warning: Could not parse some rows.")
+                if mode == "dual_interleave":
+                    stack_odd = image_parts[0::2]
+                    stack_even = image_parts[1::2]
+                    with concurrent.futures.ThreadPoolExecutor() as executor:
+                        future_odd = executor.submit(process_stack, stack_odd, api_key_1, ai_prompt)
+                        future_even = executor.submit(process_stack, stack_even, api_key_2, ai_prompt)
+                        csv_odd = future_odd.result()
+                        csv_even = future_even.result()
+                    if csv_odd:
+                        try: dfs.append(pd.read_csv(io.StringIO(clean_ai_csv(csv_odd)), on_bad_lines='skip'))
+                        except Exception: pass
+                    if csv_even:
+                        try: dfs.append(pd.read_csv(io.StringIO(clean_ai_csv(csv_even)), on_bad_lines='skip'))
+                        except Exception: pass
+                else:
+                    # Single bundle mode: Sends ALL pages together in 1 request for complete 2-page context
+                    csv_full = process_stack(image_parts, api_key_1, ai_prompt)
+                    if csv_full:
+                        try: dfs.append(pd.read_csv(io.StringIO(clean_ai_csv(csv_full)), on_bad_lines='skip'))
+                        except Exception: pass
 
                 if dfs:
                     df_final = pd.concat(dfs, ignore_index=True)
