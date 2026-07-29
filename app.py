@@ -345,7 +345,7 @@ if uploaded_files:
                     if not stack: return None
                     genai.configure(api_key=api_key, transport="rest")
                     # Using gemini-1.5-flash as the fast, standard tier for document processing
-                    model = genai.GenerativeModel('gemini-1.5-flash')
+                    model = genai.GenerativeModel('gemini-3.5-flash')
                     contents = stack + [prompt]
                     response = model.generate_content(
                         contents, 
