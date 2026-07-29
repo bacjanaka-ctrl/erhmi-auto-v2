@@ -35,12 +35,12 @@ if "user_roles" not in st.session_state:
     st.session_state.user_roles = None
 
 # ==========================================
-# 🧠 FORM CONFIGURATION LIBRARY (KNOWLEDGE BASE)
+# 🧠 STRICT ERHMIS MAPPING KNOWLEDGE BASE
 # ==========================================
 FORM_CONFIGS = {
     "631": {
         "timeframe": "monthly",
-        "processing_mode": "dual_interleave", # Split odd/even for 16-page ledgers
+        "processing_mode": "dual_interleave", 
         "ai_instructions": """
             HOW TO FIND THE DATA: 
             This is a 12-month ledger. Months are labeled with a SINGLE LETTER at the top of the columns.
@@ -50,33 +50,54 @@ FORM_CONFIGS = {
     },
     "1247": {
         "timeframe": "annual",
-        "processing_mode": "single_bundle", # Process all 2 pages together in ONE call
+        "processing_mode": "single_bundle", 
         "ai_instructions": """
-            CRITICAL VISUAL LAYOUT RULES FOR FORM H1247:
+            CRITICAL VISUAL MAPPING CHEAT SHEET FOR FORM H1247:
+            You must map the physical row numbers on the paper to the schema exactly as defined below. Do not guess.
             
-            1. TOP TABLE (Grade 1 to 13 & Other):
-               - Columns labeled (1) to (13) correspond strictly to Grade 1 through Grade 13.
-               - A dash ('-') or empty box means BLANK. Do NOT output a value if a box has a dash or is empty.
-               - Only extract handwritten digits (e.g., '02' = 2).
+            0. SYMBOLS: 
+               - Checkmark / Tick (✓) = 1
+               - Dash (-) or empty box = BLANK (Do NOT output)
                
-            2. SECTION 2 (Whether screened by PHI):
-               - Checkmarks (✓) in checkboxes mean 'Yes' or 'No'. Do NOT convert tick marks into numeric '1's for other numeric fields!
+            1. SECTION 3 (Officers participated):
+               Look at the printed numbers 1 to 11 on the paper. Map handwritten values ONLY to these specific labels:
+               Row 1 = MOH
+               Row 2 = AMOH
+               Row 3 = Other MOs
+               Row 4 = Dental Surgeon
+               Row 5 = RMO/AMO
+               Row 6 = SPHI
+               Row 7 = PHI
+               Row 8 = PHNS
+               Row 9 = HEO
+               Row 10 = SDT
+               Row 11 = PHM
+               * Example: If a '1' is written on Row 7, it belongs ONLY to 'PHI'. Do not put 1 for AMOH.
                
-            3. SECTION 3 (No. of officers participated):
-               - This section has 11 numbered rows: 1.MOH, 2.AMOH, 3.Other MOs, 4.Dental Surgeon, 5.RMO/AMO, 6.SPHI, 7.PHI, 8.PHNS, 9.HEO, 10.SDT, 11.PHM.
-               - STRICT MATCHING: Only output data for a row if a handwritten number is written directly next to THAT SPECIFIC ROW NUMBER. 
-               - Example: If '1' is written on Row 7 (PHI) and all other rows are empty, ONLY output Row 7 as 1. Do NOT put 1 into AMOH, HEO, SDT, or PHM!
+            2. SECTION 4 (Students examined):
+               Map the physical rows on the paper to these exact grades:
+               Row 1 = Grade 1
+               Row 2 = Grade 4
+               Row 3 = Grade 7
+               Row 4 = Grade 10
+               Row 5 = Other
                
-            4. SECTION 4 (No. of students examined):
-               - Contains 5 distinct blocks: 'Grade 1', 'Grade 4', 'Grade 7', 'Grade 10', 'Other'.
-               - DO NOT SHIFT VALUES UPWARD! If Grade 1 is blank on paper, leave Grade 1 completely BLANK in the output. If numbers are written in Grade 4, output them ONLY under Grade 4.
+            3. SECTION 6 (Problems & Defects Matrix):
+               The grid columns strictly correspond to:
+               Col 1 = Grade 1 (Male)
+               Col 2 = Grade 1 (Female)
+               Col 3 = Grade 4 (Male)
+               Col 4 = Grade 4 (Female)
+               Col 5 = Grade 7 (Male)
+               Col 6 = Grade 7 (Female)
+               Col 7 = Grade 10 (Male)
+               Col 8 = Grade 10 (Female)
+               Col 9 = Other (Male)
+               Col 10 = Other (Female)
+               * Trace carefully! If a '1' is in Row 2 (Wasting) and Column 3, map it to 'Wasting ---> [Grade 4 - Male]'.
                
-            5. SECTION 6 (Problems & Defects Detected Grid):
-               - Rows represent defect conditions. Columns represent Grade 1 (M/F), Grade 4 (M/F), Grade 7 (M/F), Grade 10 (M/F), Other (M/F).
-               - Carefully locate the exact grid cell where a number is written.
-               
-            6. PAGE 2 DIAGONAL LINE / 'NIL':
-               - If a large diagonal line or 'NIL' is drawn across Page 2, ALL items covered by that line are BLANK. Output NO rows for those items.
+            4. PAGE 2 'NIL':
+               If 'NIL' or a large line is drawn across a page, ignore all fields on that page.
         """
     },
     "default": {
@@ -285,7 +306,7 @@ if uploaded_files:
                 st.write("✅ Step 2 Complete.")
                 
                 # --- STEP 3: AI EXTRACTION ENGINE ROUTER ---
-                st.write("⏳ Step 3: AI is reading handwriting...")
+                st.write("⏳ Step 3: AI is reading handwriting with Schema Maps...")
                 
                 if is_annual_form:
                     target_timeframe_text = f"the entire year of {year}"
@@ -313,7 +334,7 @@ if uploaded_files:
                 STRICT RULES:
                 1. Output STRICTLY as raw CSV text. No markdown blocks (do not use ```csv).
                 2. The output MUST contain exactly 4 columns separated by commas. The first row MUST be exactly: DataElement_ID,Category_ID,Field_Description,Value
-                3. OMIT BLANKS: ONLY output rows where you found a visible handwritten number on the assigned pages. If a field is blank or has a dash ('-'), DO NOT include that row in your output.
+                3. OMIT BLANKS: ONLY output rows where you found a visible handwritten number or checkmark on the assigned pages. If a field is explicitly blank, DO NOT include that row in your output.
                 4. Do NOT hallucinate or copy values across empty rows.
 
                 SCHEMA BLUEPRINT (Use this to match IDs):
@@ -323,7 +344,8 @@ if uploaded_files:
                 def process_stack(stack, api_key, prompt):
                     if not stack: return None
                     genai.configure(api_key=api_key, transport="rest")
-                    model = genai.GenerativeModel('gemini-3.5-flash')
+                    # Using gemini-1.5-flash as the fast, standard tier for document processing
+                    model = genai.GenerativeModel('gemini-1.5-flash')
                     contents = stack + [prompt]
                     response = model.generate_content(
                         contents, 
@@ -332,7 +354,6 @@ if uploaded_files:
                     )
                     return response.text.strip()
 
-                # ROUTING: Interleaved (H631) vs Single Bundle (H1247)
                 mode = current_config.get("processing_mode", "single_bundle")
                 
                 dfs = []
@@ -351,7 +372,6 @@ if uploaded_files:
                         try: dfs.append(pd.read_csv(io.StringIO(clean_ai_csv(csv_even)), on_bad_lines='skip'))
                         except Exception: pass
                 else:
-                    # Single bundle mode: Sends ALL pages together in 1 request for complete 2-page context
                     csv_full = process_stack(image_parts, api_key_1, ai_prompt)
                     if csv_full:
                         try: dfs.append(pd.read_csv(io.StringIO(clean_ai_csv(csv_full)), on_bad_lines='skip'))
