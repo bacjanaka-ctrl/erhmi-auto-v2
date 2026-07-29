@@ -53,25 +53,32 @@ FORM_CONFIGS = {
         "processing_mode": "single_bundle", 
         "ai_instructions": """
             CRITICAL VISUAL MAPPING CHEAT SHEET FOR FORM H1247:
-            You must extract EVERY SINGLE handwritten number or checkmark from the form. Do NOT ignore any filled box.
+            You must extract EVERY SINGLE handwritten number or checkmark from ALL uploaded pages. Do NOT ignore any filled box.
             
             0. SYMBOLS: 
                - Checkmark / Tick (✓) = 1
                - Dash (-) or empty box = BLANK (Do NOT output)
                
-            1. TOP TABLE ('No. of Children' / Grade 1 to 13 & Other):
-               - Columns labeled (1) through (13) correspond to Grade 1 through Grade 13. Column (14) is 'Other'.
-               - Extract EVERY handwritten number here (Male, Female, and Total rows) and match it to the corresponding schema label.
+            1. 🛑 STOP SHIFTING VALUES! MATCH BY TEXT, NOT BY COUNTING:
+               - The schema blueprint below might not be in the exact order as the printed page. 
+               - You MUST match the data by reading the ACTUAL WORDS on the page and finding those same words in the schema's 'Field_Description'.
                
-            2. SECTION 3 (Officers participated):
-               - Map the printed numbers exactly: 1=MOH, 2=AMOH, 3=Other MOs, 4=Dental Surgeon, 5=RMO/AMO, 6=SPHI, 7=PHI, 8=PHNS, 9=HEO, 10=SDT, 11=PHM.
-               - If a '1' is written on Row 7, it belongs ONLY to 'PHI'.
+            2. TOP TABLE ('No. of Children'):
+               - The printed column headers (1) through (13) mean Grade 1 through Grade 13.
+               - Example: A number written in Column (3) MUST be matched to the schema ID containing the text "Grade 3". Do NOT shift it to Grade 2!
+               - Example: A number in Column (5) MUST be matched to the schema ID for "Grade 5".
+               - Ignore 'Total' rows, they are auto-calculated by the database.
                
-            3. SECTIONS 4 & 6 (Grades Matrix):
-               - Columns are strictly paired by Gender: Grade 1 (M), Grade 1 (F), Grade 4 (M), Grade 4 (F), Grade 7 (M), Grade 7 (F), Grade 10 (M), Grade 10 (F), Other (M), Other (F).
-               - Trace carefully! Example: A '1' in Row 2 ('Wasting') under Column 3 ('Grade 4 M') maps to 'Wasting ---> [Grade 4 - Male]'.
+            3. SECTION 3 (Officers participated):
+               - Read the printed text next to the handwritten number!
+               - If a '1' is written next to "7. PHI", you MUST search the schema for the word "PHI" and use its ID.
+               - Do NOT just pick the 2nd ID (AMOH) because it is the only number in the list. Match the word!
+               
+            4. SECTIONS 4 & 6 (Grades Matrix):
+               - Read the column headers: 'Grade 1', 'Grade 4', 'Grade 7', 'Grade 10', 'Other'.
+               - Map the exact condition (e.g. 'Wasting'), Grade, and Gender to the exact matching text in the schema blueprint.
 
-            WARNING: Find the matching 11-character Schema IDs for EVERY number you see on the page. Do NOT skip the top table.
+            WARNING: Find the matching 11-character Schema IDs for EVERY number you see across ALL pages. Double-check that your mapped 'Field_Description' perfectly matches the printed label on the paper.
         """
     },
     "default": {
@@ -79,8 +86,7 @@ FORM_CONFIGS = {
         "processing_mode": "single_bundle",
         "ai_instructions": """
             HOW TO FIND THE DATA:
-            This is a standard summary form.
-            Scan the uploaded pages for fields that match the 'Field_Description' labels in the schema below.
+            This is a standard summary form. Scan all uploaded pages.
             Extract the number written directly next to, below, or inside the box for that specific label.
         """
     }
