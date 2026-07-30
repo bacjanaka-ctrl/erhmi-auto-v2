@@ -53,32 +53,29 @@ FORM_CONFIGS = {
         "processing_mode": "single_bundle", 
         "ai_instructions": """
             CRITICAL VISUAL MAPPING CHEAT SHEET FOR FORM H1247:
-            You must extract EVERY SINGLE handwritten number or checkmark from ALL uploaded pages. Do NOT ignore any filled box.
+            You must extract EVERY SINGLE handwritten number or checkmark. Do NOT ignore any filled box.
             
-            0. SYMBOLS: 
-               - Checkmark / Tick (✓) = 1
+            0. SYMBOLS & TOTALS: 
+               - Checkmark / Tick (✓) = 1 (or 'Yes' for Section 2)
                - Dash (-) or empty box = BLANK (Do NOT output)
+               - 🛑 THE 'TOTAL BOX' ERROR: The physical paper DOES NOT have 'Total' boxes for Section 4 or 6. Officers often mistakenly write the TOTAL sum in the "5. Other" row. If the numbers in "5. Other" appear to be a sum of the grades above it, DO NOT extract them! ERHMIS auto-calculates totals. Also, do NOT extract the 'Total' row from the Top Table.
                
-            1. 🛑 STOP SHIFTING VALUES! MATCH BY TEXT, NOT BY COUNTING:
-               - The schema blueprint below might not be in the exact order as the printed page. 
+            1. 🛑 STOP SHIFTING VALUES! MATCH BY EXACT TEXT:
                - You MUST match the data by reading the ACTUAL WORDS on the page and finding those same words in the schema's 'Field_Description'.
                
             2. TOP TABLE ('No. of Children'):
-               - The printed column headers (1) through (13) mean Grade 1 through Grade 13.
-               - Example: A number written in Column (3) MUST be matched to the schema ID containing the text "Grade 3". Do NOT shift it to Grade 2!
-               - Example: A number in Column (5) MUST be matched to the schema ID for "Grade 5".
-               - Ignore 'Total' rows, they are auto-calculated by the database.
+               - Columns (1) through (13) mean Grade 1 through Grade 13.
                
             3. SECTION 3 (Officers participated):
                - Read the printed text next to the handwritten number!
-               - If a '1' is written next to "7. PHI", you MUST search the schema for the word "PHI" and use its ID.
-               - Do NOT just pick the 2nd ID (AMOH) because it is the only number in the list. Match the word!
+               - If a '1' is written next to "7. PHI", you MUST search the schema for the word "PHI" and use its exact ID.
+               - DO NOT shift values up to empty rows (e.g., do not put the PHI value into AMOH or MOH). If Rows 1 through 6 are blank, output NOTHING for them.
                
             4. SECTIONS 4 & 6 (Grades Matrix):
                - Read the column headers: 'Grade 1', 'Grade 4', 'Grade 7', 'Grade 10', 'Other'.
-               - Map the exact condition (e.g. 'Wasting'), Grade, and Gender to the exact matching text in the schema blueprint.
+               - Map the exact condition, Grade, and Gender to the exact matching text in the schema blueprint.
 
-            WARNING: Find the matching 11-character Schema IDs for EVERY number you see across ALL pages. Double-check that your mapped 'Field_Description' perfectly matches the printed label on the paper.
+            WARNING: Find the matching 11-character Schema IDs for EVERY number you see across ALL pages. Never guess an ID.
         """
     },
     "default": {
