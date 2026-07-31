@@ -53,29 +53,30 @@ FORM_CONFIGS = {
         "processing_mode": "single_bundle", 
         "ai_instructions": """
             CRITICAL VISUAL MAPPING CHEAT SHEET FOR FORM H1247:
-            You must extract EVERY SINGLE handwritten number or checkmark. Do NOT ignore any filled box.
             
-            0. SYMBOLS & TOTALS: 
-               - Checkmark / Tick (✓) = 1 (or 'Yes' for Section 2)
-               - Dash (-) or empty box = BLANK (Do NOT output)
-               - 🛑 THE 'TOTAL BOX' ERROR: The physical paper DOES NOT have 'Total' boxes for Section 4 or 6. Officers often mistakenly write the TOTAL sum in the "5. Other" row. If the numbers in "5. Other" appear to be a sum of the grades above it, DO NOT extract them! ERHMIS auto-calculates totals. Also, do NOT extract the 'Total' row from the Top Table.
+            0. 🚨 SECTION 6 IS SPLIT ACROSS TWO PAGES (READ CAREFULLY):
+               - PAGE 1 BOTTOM contains Items 1 through 10 (Stunting, Wasting, Overweight, Obesity, Referred, Visual, Hearing, Speech, Pallor, Untreated caries).
+               - PAGE 2 TOP contains Items 11 through 35 (Calculus, ENT defects, Heart problems, Asthma, etc.).
                
-            1. 🛑 STOP SHIFTING VALUES! MATCH BY EXACT TEXT:
-               - You MUST match the data by reading the ACTUAL WORDS on the page and finding those same words in the schema's 'Field_Description'.
+            1. 🛑 PAGE 2 'NIL' LINE IS STRICTLY LIMITED TO PAGE 2:
+               - The diagonal blue line and 'NIL' drawn on Page 2 ONLY applies to Items 11 through 35!
+               - DO NOT skip Items 1 through 10 at the bottom of Page 1!
                
-            2. TOP TABLE ('No. of Children'):
-               - Columns (1) through (13) mean Grade 1 through Grade 13.
+            2. SECTION 6 (PAGE 1 ITEMS 1 TO 10 EXTRACTION):
+               - Item 2: 'Wasting (< -2SD)' -> Extract written digits (e.g. '01' in Grade 4 Male).
+               - Item 3: 'Overweight (> +1SD to +2SD)' -> Extract written digits (e.g. '01' in Other Male, '04' in Other Female).
+               - Map these condition names + Grade + Gender directly to the exact matching 'Field_Description' in the Schema Blueprint!
                
-            3. SECTION 3 (Officers participated):
-               - Read the printed text next to the handwritten number!
-               - If a '1' is written next to "7. PHI", you MUST search the schema for the word "PHI" and use its exact ID.
-               - DO NOT shift values up to empty rows (e.g., do not put the PHI value into AMOH or MOH). If Rows 1 through 6 are blank, output NOTHING for them.
+            3. TOP TABLE ('No. of Children'):
+               - Extract numbers written under columns (1) through (13) and map to Grade 1 through Grade 13.
                
-            4. SECTIONS 4 & 6 (Grades Matrix):
-               - Read the column headers: 'Grade 1', 'Grade 4', 'Grade 7', 'Grade 10', 'Other'.
-               - Map the exact condition, Grade, and Gender to the exact matching text in the schema blueprint.
-
-            WARNING: Find the matching 11-character Schema IDs for EVERY number you see across ALL pages. Never guess an ID.
+            4. SECTION 3 (Officers participated):
+               - Read the printed text next to the row number! If '1' is written on Row 7 (PHI), map ONLY to PHI. Do NOT shift to MOH or AMOH.
+               
+            5. SECTION 4 (Students examined):
+               - Match Grade 1, Grade 4, Grade 7, Grade 10, Other directly by title.
+               
+            6. SYMBOLS: Checkmark (✓) = 1. Dash (-) or blank = DO NOT output.
         """
     },
     "default": {
@@ -396,7 +397,6 @@ if "extracted_csv" in st.session_state:
         parts = line.split(',')
         if len(parts) >= 4 and parts[0] != "DataElement_ID":
             de_id, cat_id, val = parts[0].strip(), parts[1].strip(), parts[-1].strip()
-            # Strict length validation ensures we don't upload AI hallucinations
             if len(de_id) >= 10 and len(cat_id) >= 10 and val and val != "Value":
                 try:
                     clean_val = str(int(float(val)))
@@ -436,7 +436,6 @@ if "extracted_csv" in st.session_state:
                     st.json(res_json)
                     
                     if post_res.status_code in [200, 201]:
-                        # Intelligent Import Summary Parsing to catch ERHMIS rejections
                         imported = 0
                         ignored = 0
                         if "response" in res_json and "importCount" in res_json["response"]:
@@ -448,7 +447,7 @@ if "extracted_csv" in st.session_state:
 
                         if ignored > 0 and imported == 0:
                             st.error(f"❌ ERHMIS REJECTED THE DATA! (Ignored: {ignored})")
-                            st.warning("⚠️ ERHMIS refused to save the data. This usually means the 'Period' (Yearly vs Monthly) is incorrect for this form. Try checking the 'Force Monthly Format' box above!")
+                            st.warning("⚠️ ERHMIS refused to save the data. Try checking the 'Force Monthly Format' box above!")
                         elif ignored > 0:
                             st.warning(f"⚠️ Partial Upload! Imported: {imported}, Ignored: {ignored}")
                             st.success(f"✨ Data is live for {selected_clinic_name}, but some records were rejected.")
