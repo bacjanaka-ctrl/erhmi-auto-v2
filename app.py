@@ -35,57 +35,98 @@ if "user_roles" not in st.session_state:
     st.session_state.user_roles = None
 
 # ==========================================
-# 🧠 STRICT ERHMIS MAPPING KNOWLEDGE BASE
+# 🧠 ISOLATED PROMPT CONFIGURATION LIBRARY
 # ==========================================
 FORM_CONFIGS = {
     "631": {
         "timeframe": "monthly",
         "processing_mode": "dual_interleave", 
-        "ai_instructions": """
-            HOW TO FIND THE DATA: 
-            This is a 12-month ledger. Months are labeled with a SINGLE LETTER at the top of the columns.
-            For {target_month_name}, look for the column labeled '{target_month_letter}'.
-            Because some letters repeat, ensure accuracy: {target_month_name} is data column number {target_month_num} from left to right.
+        "prompt_template": """
+            Your task is to act as an expert data entry assistant for the Sri Lankan Ministry of Health.
+            Carefully read the handwritten and printed numbers from the attached images of the health report.
+            
+            CRITICAL INSTRUCTION - TARGET MONTH: 
+            The images may contain a ledger with data for multiple months. 
+            You MUST ONLY extract the data for the month of {target_timeframe_text}. 
+            
+            HOW TO FIND THE MONTH:
+            The months are labeled at the top of the columns with a SINGLE LETTER (J, F, M, A, M, J, J, A, S, O, N, D).
+            For {target_timeframe_text}, look strictly at column number {target_month_num} from left to right (labeled '{target_month_letter}').
+            IMPORTANT: Completely ignore 'Quarter' or 'Q' columns (e.g., Q1, Q2, Q3, Q4). Only extract from the specific single-letter month column.
+            Ignore data from any other months, and completely ignore obsolete data before 2025.
+
+            Look at the 'Field_Description' column in the schema below, match the correct data for {target_timeframe_text}, and type the extracted number into the 'Value' column.
+
+            STRICT RULES:
+            1. Output the final result STRICTLY as raw CSV text. Do NOT wrap it in Markdown formatting blocks (do not use ```csv).
+            2. Keep the DataElement_ID and Category_ID columns exactly as they appear in the schema. Do not alter these codes.
+            3. The final output must have exactly these 4 columns: DataElement_ID, Category_ID, Field_Description, Value.
+            4. Do not omit any rows. Every single row from the blueprint must be in your output.
+            5. If a field is blank, unreadable, or crossed out for {target_timeframe_text}, leave the Value column completely blank. Do NOT write '0' unless there is literally a '0' written on the form.
+
+            SCHEMA BLUEPRINT (Use this to match IDs):
+            {schema_blueprint}
         """
     },
     "1247": {
         "timeframe": "annual",
         "processing_mode": "single_bundle", 
-        "ai_instructions": """
+        "prompt_template": """
+            You are an expert data entry assistant for the Sri Lankan Ministry of Health.
+            CRITICAL INSTRUCTION: You MUST ONLY extract the data for {target_timeframe_text}.
+
             CRITICAL VISUAL MAPPING CHEAT SHEET FOR FORM H1247:
+            You must extract EVERY SINGLE handwritten number or checkmark. Do NOT ignore any filled box.
             
-            0. 🚨 SECTION 6 IS SPLIT ACROSS TWO PAGES (READ CAREFULLY):
-               - PAGE 1 BOTTOM contains Items 1 through 10 (Stunting, Wasting, Overweight, Obesity, Referred, Visual, Hearing, Speech, Pallor, Untreated caries).
-               - PAGE 2 TOP contains Items 11 through 35 (Calculus, ENT defects, Heart problems, Asthma, etc.).
+            0. SYMBOLS & TOTALS: 
+               - Checkmark / Tick (✓) = 1 (or 'Yes' for Section 2)
+               - Dash (-) or empty box = BLANK (Do NOT output)
+               - 🛑 THE 'TOTAL BOX' ERROR: The physical paper DOES NOT have 'Total' boxes for Section 4 or 6. Officers often mistakenly write the TOTAL sum in the "5. Other" row. If the numbers in "5. Other" appear to be a sum of the grades above it, DO NOT extract them! ERHMIS auto-calculates totals. Also, do NOT extract the 'Total' row from the Top Table.
                
-            1. 🛑 PAGE 2 'NIL' LINE IS STRICTLY LIMITED TO PAGE 2:
-               - The diagonal blue line and 'NIL' drawn on Page 2 ONLY applies to Items 11 through 35!
-               - DO NOT skip Items 1 through 10 at the bottom of Page 1!
+            1. 🛑 STOP SHIFTING VALUES! MATCH BY EXACT TEXT:
+               - You MUST match the data by reading the ACTUAL WORDS on the page and finding those same words in the schema's 'Field_Description'.
                
-            2. SECTION 6 (PAGE 1 ITEMS 1 TO 10 EXTRACTION):
-               - Item 2: 'Wasting (< -2SD)' -> Extract written digits (e.g. '01' in Grade 4 Male).
-               - Item 3: 'Overweight (> +1SD to +2SD)' -> Extract written digits (e.g. '01' in Other Male, '04' in Other Female).
-               - Map these condition names + Grade + Gender directly to the exact matching 'Field_Description' in the Schema Blueprint!
+            2. TOP TABLE ('No. of Children'):
+               - Columns (1) through (13) mean Grade 1 through Grade 13.
                
-            3. TOP TABLE ('No. of Children'):
-               - Extract numbers written under columns (1) through (13) and map to Grade 1 through Grade 13.
+            3. SECTION 3 (Officers participated):
+               - Read the printed text next to the handwritten number!
+               - If a '1' is written next to "7. PHI", you MUST search the schema for the word "PHI" and use its exact ID.
+               - DO NOT shift values up to empty rows (e.g., do not put the PHI value into AMOH or MOH). If Rows 1 through 6 are blank, output NOTHING for them.
                
-            4. SECTION 3 (Officers participated):
-               - Read the printed text next to the row number! If '1' is written on Row 7 (PHI), map ONLY to PHI. Do NOT shift to MOH or AMOH.
-               
-            5. SECTION 4 (Students examined):
-               - Match Grade 1, Grade 4, Grade 7, Grade 10, Other directly by title.
-               
-            6. SYMBOLS: Checkmark (✓) = 1. Dash (-) or blank = DO NOT output.
+            4. SECTIONS 4 & 6 (Grades Matrix):
+               - Read the column headers: 'Grade 1', 'Grade 4', 'Grade 7', 'Grade 10', 'Other'.
+               - Map the exact condition, Grade, and Gender to the exact matching text in the schema blueprint.
+
+            STRICT RULES:
+            1. Output STRICTLY as raw CSV text. No markdown blocks (do not use ```csv).
+            2. The output MUST contain exactly 4 columns separated by commas. 
+            3. STRICT ID MATCHING: The 'DataElement_ID' and 'Category_ID' must be the exact 11-character codes pulled directly from the Schema Blueprint below. NEVER invent your own ID strings.
+            4. OMIT BLANKS: ONLY output rows where you found a visible handwritten number or checkmark on the assigned pages. 
+
+            SCHEMA BLUEPRINT (Use this to match IDs):
+            {schema_blueprint}
         """
     },
     "default": {
         "timeframe": "monthly",
         "processing_mode": "single_bundle",
-        "ai_instructions": """
+        "prompt_template": """
+            You are an expert data entry assistant for the Sri Lankan Ministry of Health.
+            CRITICAL INSTRUCTION: You MUST ONLY extract the data for {target_timeframe_text}.
+            
             HOW TO FIND THE DATA:
             This is a standard summary form. Scan all uploaded pages.
             Extract the number written directly next to, below, or inside the box for that specific label.
+
+            STRICT RULES:
+            1. Output STRICTLY as raw CSV text. No markdown blocks (do not use ```csv).
+            2. The output MUST contain exactly 4 columns separated by commas. 
+            3. STRICT ID MATCHING: The 'DataElement_ID' and 'Category_ID' must be the exact 11-character codes pulled directly from the Schema Blueprint below. NEVER invent your own ID strings.
+            4. OMIT BLANKS: ONLY output rows where you found a visible handwritten number or checkmark on the assigned pages. 
+
+            SCHEMA BLUEPRINT (Use this to match IDs):
+            {schema_blueprint}
         """
     }
 }
@@ -289,7 +330,7 @@ if uploaded_files:
                 st.write("✅ Step 2 Complete.")
                 
                 # --- STEP 3: AI EXTRACTION ENGINE ROUTER ---
-                st.write("⏳ Step 3: AI is reading handwriting with Schema Maps...")
+                st.write(f"⏳ Step 3: AI is reading handwriting for {selected_form_name}...")
                 
                 if is_annual_form:
                     target_timeframe_text = f"the entire year of {year}"
@@ -306,23 +347,14 @@ if uploaded_files:
                         "target_month_num": str(int(month))
                     }
 
-                specific_instructions = current_config["ai_instructions"].format(**month_context)
-
-                ai_prompt = f"""
-                You are an expert data entry assistant for the Sri Lankan Ministry of Health.
-                CRITICAL INSTRUCTION: You MUST ONLY extract the data for {target_timeframe_text}.
-                
-                {specific_instructions}
-
-                STRICT RULES:
-                1. Output STRICTLY as raw CSV text. No markdown blocks (do not use ```csv).
-                2. The output MUST contain exactly 4 columns separated by commas. 
-                3. STRICT ID MATCHING: The 'DataElement_ID' and 'Category_ID' must be the exact 11-character codes pulled directly from the Schema Blueprint below. NEVER invent your own ID strings.
-                4. OMIT BLANKS: ONLY output rows where you found a visible handwritten number or checkmark on the assigned pages. 
-
-                SCHEMA BLUEPRINT (Use this to match IDs):
-                {schema_blueprint}
-                """
+                # Dynamically inject instructions into the specific template for this form
+                ai_prompt = current_config["prompt_template"].format(
+                    target_timeframe_text=target_timeframe_text,
+                    target_month_name=month_context.get("target_month_name", ""),
+                    target_month_letter=month_context.get("target_month_letter", ""),
+                    target_month_num=month_context.get("target_month_num", ""),
+                    schema_blueprint=schema_blueprint
+                )
 
                 def process_stack(stack, api_key, prompt):
                     if not stack: return None
@@ -332,7 +364,7 @@ if uploaded_files:
                     response = model.generate_content(
                         contents, 
                         generation_config={"temperature": 0.0, "max_output_tokens": 8192},
-                        request_options={"timeout": 500}
+                        request_options={"timeout": 120}
                     )
                     return response.text.strip()
 
@@ -365,6 +397,7 @@ if uploaded_files:
                     if 'Value' not in df_final.columns:
                         df_final['Value'] = np.nan
                     
+                    # This safely drops the blank rows generated by the V1 prompt so they don't break ERHMIS!
                     df_final['Value'] = df_final['Value'].replace(r'^\s*$', np.nan, regex=True)
                     df_final = df_final.dropna(subset=['Value'])
                     
