@@ -360,27 +360,43 @@ if uploaded_files:
                     schema_blueprint=schema_blueprint
                 )
 
-                def process_stack(stack, api_key, prompt):
+                def process_stack(stack, primary_key, backup_key, prompt):
                     if not stack: return None
-                    genai.configure(api_key=api_key, transport="grpc")
-                    model = genai.GenerativeModel('gemini-3.5-flash')
                     contents = stack + [prompt]
-                    response = model.generate_content(
-                        contents, 
-                        generation_config={"temperature": 0.0, "max_output_tokens": 8192},
-                        request_options={"timeout": 120}
-                    )
-                    return response.text.strip()
+                    
+                    try:
+                        # ATTEMPT 1: Primary Key + High-Speed gRPC Transport + Optimized Tokens
+                        genai.configure(api_key=primary_key, transport="grpc")
+                        model = genai.GenerativeModel('gemini-3.5-flash')
+                        response = model.generate_content(
+                            contents, 
+                            generation_config={"temperature": 0.0, "max_output_tokens": 4096},
+                            request_options={"timeout": 60}
+                        )
+                        return response.text.strip()
+                    except Exception as e:
+                        # ATTEMPT 2: 429 Quota Exceeded? Silently failover to Key 2!
+                        st.toast("⚠️ Key 1 Quota Exceeded! Seamlessly switching to Backup Key...", icon="🔄")
+                        genai.configure(api_key=backup_key, transport="grpc")
+                        model = genai.GenerativeModel('gemini-3.5-flash')
+                        response = model.generate_content(
+                            contents, 
+                            generation_config={"temperature": 0.0, "max_output_tokens": 4096},
+                            request_options={"timeout": 60}
+                        )
+                        return response.text.strip()
 
                 mode = current_config.get("processing_mode", "single_bundle")
                 
                 dfs = []
                 if mode == "dual_interleave":
+                    # Load Balance: Odd pages prefer Key 1, Even pages prefer Key 2. 
+                    # If either fails, they swap backup keys!
                     stack_odd = image_parts[0::2]
                     stack_even = image_parts[1::2]
                     with concurrent.futures.ThreadPoolExecutor() as executor:
-                        future_odd = executor.submit(process_stack, stack_odd, api_key_1, ai_prompt)
-                        future_even = executor.submit(process_stack, stack_even, api_key_2, ai_prompt)
+                        future_odd = executor.submit(process_stack, stack_odd, api_key_1, api_key_2, ai_prompt)
+                        future_even = executor.submit(process_stack, stack_even, api_key_2, api_key_1, ai_prompt)
                         csv_odd = future_odd.result()
                         csv_even = future_even.result()
                     if csv_odd:
@@ -390,7 +406,8 @@ if uploaded_files:
                         try: dfs.append(pd.read_csv(io.StringIO(clean_ai_csv(csv_even)), on_bad_lines='skip'))
                         except Exception: pass
                 else:
-                    csv_full = process_stack(image_parts, api_key_1, ai_prompt)
+                    # Single Bundle passes Key 1 as primary, Key 2 as backup
+                    csv_full = process_stack(image_parts, api_key_1, api_key_2, ai_prompt)
                     if csv_full:
                         try: dfs.append(pd.read_csv(io.StringIO(clean_ai_csv(csv_full)), on_bad_lines='skip'))
                         except Exception: pass
