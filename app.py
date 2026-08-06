@@ -320,7 +320,7 @@ if uploaded_files:
                     img = Image.open(f)
                     if img.mode != 'RGB': img = img.convert('RGB')
                     
-                    # UPGRADED TO 1280px FOR CRYSTAL CLEAR HANDWRITING RECOGNITION
+                    # 1280px FOR CRYSTAL CLEAR HANDWRITING RECOGNITION
                     img.thumbnail((1280, 1280)) 
                     img_byte_arr = io.BytesIO()
                     img.save(img_byte_arr, format='JPEG', quality=50) 
@@ -360,7 +360,8 @@ if uploaded_files:
                 )
 
                 def process_single_page(page_data, primary_key, backup_key, prompt):
-                    contents = [[page_data], prompt]
+                    # FIX: Corrected list structure [page_data, prompt]
+                    contents = [page_data, prompt]
                     try:
                         genai.configure(api_key=primary_key, transport="rest")
                         model = genai.GenerativeModel('gemini-3.5-flash')
@@ -383,13 +384,11 @@ if uploaded_files:
                 dfs = []
                 # Execute all pages concurrently in a multi-threaded pool
                 with concurrent.futures.ThreadPoolExecutor(max_workers=len(image_parts)) as executor:
-                    # Submit each page as an independent API task
                     futures = [
                         executor.submit(process_single_page, page, api_key_1, api_key_2, ai_prompt) 
                         for page in image_parts
                     ]
                     
-                    # Gather the results as they finish
                     for future in concurrent.futures.as_completed(futures):
                         csv_result = future.result()
                         if csv_result:
