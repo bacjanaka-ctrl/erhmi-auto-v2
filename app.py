@@ -40,7 +40,6 @@ if "user_roles" not in st.session_state:
 FORM_CONFIGS = {
     "631": {
         "timeframe": "monthly",
-        "processing_mode": "single_bundle", # RESTORED TO V1 BEHAVIOR!
         "prompt_template": """
             Your task is to act as an expert data entry assistant for the Sri Lankan Ministry of Health.
             Carefully read the handwritten and printed numbers from the attached images of the health report.
@@ -69,7 +68,6 @@ FORM_CONFIGS = {
     },
     "1247": {
         "timeframe": "annual",
-        "processing_mode": "single_bundle", 
         "prompt_template": """
             You are an expert data entry assistant for the Sri Lankan Ministry of Health.
             CRITICAL INSTRUCTION: You MUST ONLY extract the data for {target_timeframe_text}.
@@ -114,7 +112,6 @@ FORM_CONFIGS = {
     },
     "default": {
         "timeframe": "monthly",
-        "processing_mode": "single_bundle",
         "prompt_template": """
             You are an expert data entry assistant for the Sri Lankan Ministry of Health.
             CRITICAL INSTRUCTION: You MUST ONLY extract the data for {target_timeframe_text}.
@@ -284,9 +281,9 @@ if uploaded_files:
     with st.expander("👀 Tap here to preview your photos"):
         cols = st.columns(3) 
         for i, img_file in enumerate(uploaded_files):
-            cols[i % 3].image(img_file, caption=f"Page {i+1}", use_column_width=True)
+            cols[i % 3].image(img_file, caption=f"Page {i+1}", use_container_width=True)
 
-    if st.button("✨ Extract Data via Dual-Core AI", type="primary", use_container_width=True):
+    if st.button("✨ Extract Data via Parallel Engine", type="primary", use_container_width=True):
         
         api_key_1 = get_api_key("GEMINI_API_KEY_1")
         api_key_2 = get_api_key("GEMINI_API_KEY_2")
@@ -316,15 +313,18 @@ if uploaded_files:
                 schema_blueprint = schema_buffer.getvalue()
                 st.write("✅ Step 1 Complete.")
 
-                # --- STEP 2: MEMORY SAFE COMPRESSION ---
-                st.write("⏳ Step 2: Compressing photos...")
+                # --- STEP 2: HIGH-DEFINITION COMPRESSION ---
+                st.write("⏳ Step 2: Preparing HD images for parallel processing...")
                 image_parts = []
                 for f in uploaded_files:
                     img = Image.open(f)
                     if img.mode != 'RGB': img = img.convert('RGB')
-                    img.thumbnail((800, 800)) 
+                    
+                    # UPGRADED TO 1280px FOR CRYSTAL CLEAR HANDWRITING RECOGNITION
+                    img.thumbnail((1280, 1280)) 
                     img_byte_arr = io.BytesIO()
-                    img.save(img_byte_arr, format='JPEG', quality=45) 
+                    img.save(img_byte_arr, format='JPEG', quality=50) 
+                    
                     image_parts.append({
                         "mime_type": "image/jpeg",
                         "data": img_byte_arr.getvalue()
@@ -333,8 +333,8 @@ if uploaded_files:
                     gc.collect()
                 st.write("✅ Step 2 Complete.")
                 
-                # --- STEP 3: AI EXTRACTION ENGINE ROUTER ---
-                st.write(f"⏳ Step 3: AI is reading handwriting for {selected_form_name}...")
+                # --- STEP 3: PARALLEL AI EXTRACTION ENGINE ---
+                st.write(f"⏳ Step 3: AI is processing {len(image_parts)} pages simultaneously...")
                 
                 if is_annual_form:
                     target_timeframe_text = f"the entire year of {year}"
@@ -351,7 +351,6 @@ if uploaded_files:
                         "target_month_num": str(int(month))
                     }
 
-                # Dynamically inject instructions into the specific template for this form
                 ai_prompt = current_config["prompt_template"].format(
                     target_timeframe_text=target_timeframe_text,
                     target_month_name=month_context.get("target_month_name", ""),
@@ -360,13 +359,10 @@ if uploaded_files:
                     schema_blueprint=schema_blueprint
                 )
 
-                def process_stack(stack, primary_key, backup_key, prompt):
-                    if not stack: return None
-                    contents = stack + [prompt]
-                    
+                def process_single_page(page_data, primary_key, backup_key, prompt):
+                    contents = [[page_data], prompt]
                     try:
-                        # ATTEMPT 1: Primary Key + High-Speed gRPC Transport + Optimized Tokens
-                        genai.configure(api_key=primary_key, transport="grpc")
+                        genai.configure(api_key=primary_key, transport="rest")
                         model = genai.GenerativeModel('gemini-3.5-flash')
                         response = model.generate_content(
                             contents, 
@@ -375,9 +371,7 @@ if uploaded_files:
                         )
                         return response.text.strip()
                     except Exception as e:
-                        # ATTEMPT 2: 429 Quota Exceeded? Silently failover to Key 2!
-                        st.toast("⚠️ Key 1 Quota Exceeded! Seamlessly switching to Backup Key...", icon="🔄")
-                        genai.configure(api_key=backup_key, transport="grpc")
+                        genai.configure(api_key=backup_key, transport="rest")
                         model = genai.GenerativeModel('gemini-3.5-flash')
                         response = model.generate_content(
                             contents, 
@@ -386,31 +380,23 @@ if uploaded_files:
                         )
                         return response.text.strip()
 
-                mode = current_config.get("processing_mode", "single_bundle")
-                
                 dfs = []
-                if mode == "dual_interleave":
-                    # Load Balance: Odd pages prefer Key 1, Even pages prefer Key 2. 
-                    # If either fails, they swap backup keys!
-                    stack_odd = image_parts[0::2]
-                    stack_even = image_parts[1::2]
-                    with concurrent.futures.ThreadPoolExecutor() as executor:
-                        future_odd = executor.submit(process_stack, stack_odd, api_key_1, api_key_2, ai_prompt)
-                        future_even = executor.submit(process_stack, stack_even, api_key_2, api_key_1, ai_prompt)
-                        csv_odd = future_odd.result()
-                        csv_even = future_even.result()
-                    if csv_odd:
-                        try: dfs.append(pd.read_csv(io.StringIO(clean_ai_csv(csv_odd)), on_bad_lines='skip'))
-                        except Exception: pass
-                    if csv_even:
-                        try: dfs.append(pd.read_csv(io.StringIO(clean_ai_csv(csv_even)), on_bad_lines='skip'))
-                        except Exception: pass
-                else:
-                    # Single Bundle passes Key 1 as primary, Key 2 as backup
-                    csv_full = process_stack(image_parts, api_key_1, api_key_2, ai_prompt)
-                    if csv_full:
-                        try: dfs.append(pd.read_csv(io.StringIO(clean_ai_csv(csv_full)), on_bad_lines='skip'))
-                        except Exception: pass
+                # Execute all pages concurrently in a multi-threaded pool
+                with concurrent.futures.ThreadPoolExecutor(max_workers=len(image_parts)) as executor:
+                    # Submit each page as an independent API task
+                    futures = [
+                        executor.submit(process_single_page, page, api_key_1, api_key_2, ai_prompt) 
+                        for page in image_parts
+                    ]
+                    
+                    # Gather the results as they finish
+                    for future in concurrent.futures.as_completed(futures):
+                        csv_result = future.result()
+                        if csv_result:
+                            try:
+                                dfs.append(pd.read_csv(io.StringIO(clean_ai_csv(csv_result)), on_bad_lines='skip'))
+                            except Exception:
+                                pass
 
                 if dfs:
                     df_final = pd.concat(dfs, ignore_index=True)
@@ -418,7 +404,6 @@ if uploaded_files:
                     if 'Value' not in df_final.columns:
                         df_final['Value'] = np.nan
                     
-                    # This safely drops the blank rows generated by the V1 prompt so they don't break ERHMIS!
                     df_final['Value'] = df_final['Value'].replace(r'^\s*$', np.nan, regex=True)
                     df_final = df_final.dropna(subset=['Value'])
                     
