@@ -5,6 +5,7 @@ import csv
 import io
 import os
 import gc
+import time
 import google.generativeai as genai
 from PIL import Image
 import concurrent.futures
@@ -320,7 +321,6 @@ if uploaded_files:
                     img = Image.open(f)
                     if img.mode != 'RGB': img = img.convert('RGB')
                     
-                    # 1280px FOR CRYSTAL CLEAR HANDWRITING RECOGNITION
                     img.thumbnail((1280, 1280)) 
                     img_byte_arr = io.BytesIO()
                     img.save(img_byte_arr, format='JPEG', quality=50) 
@@ -334,7 +334,7 @@ if uploaded_files:
                 st.write("✅ Step 2 Complete.")
                 
                 # --- STEP 3: PARALLEL AI EXTRACTION ENGINE ---
-                st.write(f"⏳ Step 3: AI is processing {len(image_parts)} pages simultaneously...")
+                st.write(f"⏳ Step 3: AI is processing {len(image_parts)} pages (Throttled mode)...")
                 
                 if is_annual_form:
                     target_timeframe_text = f"the entire year of {year}"
@@ -360,7 +360,6 @@ if uploaded_files:
                 )
 
                 def process_single_page(page_data, primary_key, backup_key, prompt):
-                    # FIX: Corrected list structure [page_data, prompt]
                     contents = [page_data, prompt]
                     try:
                         genai.configure(api_key=primary_key, transport="rest")
@@ -372,6 +371,10 @@ if uploaded_files:
                         )
                         return response.text.strip()
                     except Exception as e:
+                        error_str = str(e)
+                        if "429" in error_str or "Quota" in error_str:
+                            time.sleep(5) # Give the server a 5-second rest if we hit the limit
+                        
                         genai.configure(api_key=backup_key, transport="rest")
                         model = genai.GenerativeModel('gemini-3.5-flash')
                         response = model.generate_content(
@@ -382,12 +385,12 @@ if uploaded_files:
                         return response.text.strip()
 
                 dfs = []
-                # Execute all pages concurrently in a multi-threaded pool
-                with concurrent.futures.ThreadPoolExecutor(max_workers=len(image_parts)) as executor:
-                    futures = [
-                        executor.submit(process_single_page, page, api_key_1, api_key_2, ai_prompt) 
-                        for page in image_parts
-                    ]
+                # FIX: Throttled to max 2 simultaneous workers to prevent hitting the Burst limit
+                with concurrent.futures.ThreadPoolExecutor(max_workers=2) as executor:
+                    futures = []
+                    for page in image_parts:
+                        futures.append(executor.submit(process_single_page, page, api_key_1, api_key_2, ai_prompt))
+                        time.sleep(1) # Traffic light: Staggers each page by 1 second to pace the requests
                     
                     for future in concurrent.futures.as_completed(futures):
                         csv_result = future.result()
