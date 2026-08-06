@@ -284,7 +284,7 @@ if uploaded_files:
         for i, img_file in enumerate(uploaded_files):
             cols[i % 3].image(img_file, caption=f"Page {i+1}", use_container_width=True)
 
-    if st.button("✨ Extract Data via Parallel Engine", type="primary", use_container_width=True):
+    if st.button("✨ Extract Data via Full Context Engine", type="primary", use_container_width=True):
         
         api_key_1 = get_api_key("GEMINI_API_KEY_1")
         api_key_2 = get_api_key("GEMINI_API_KEY_2")
@@ -315,7 +315,7 @@ if uploaded_files:
                 st.write("✅ Step 1 Complete.")
 
                 # --- STEP 2: HIGH-DEFINITION COMPRESSION ---
-                st.write("⏳ Step 2: Preparing HD images for parallel processing...")
+                st.write("⏳ Step 2: Preparing HD images...")
                 image_parts = []
                 for f in uploaded_files:
                     img = Image.open(f)
@@ -333,8 +333,8 @@ if uploaded_files:
                     gc.collect()
                 st.write("✅ Step 2 Complete.")
                 
-                # --- STEP 3: PARALLEL AI EXTRACTION ENGINE ---
-                st.write(f"⏳ Step 3: AI is processing {len(image_parts)} pages (Throttled mode)...")
+                # --- STEP 3: FULL CONTEXT BUNDLE ENGINE (RESTORED FROM V1) ---
+                st.write(f"⏳ Step 3: AI is processing all {len(image_parts)} pages together for maximum context...")
                 
                 if is_annual_form:
                     target_timeframe_text = f"the entire year of {year}"
@@ -359,46 +359,43 @@ if uploaded_files:
                     schema_blueprint=schema_blueprint
                 )
 
-                def process_single_page(page_data, primary_key, backup_key, prompt):
-                    contents = [page_data, prompt]
+                def process_full_bundle(stack, primary_key, backup_key, prompt):
+                    contents = stack + [prompt]
                     try:
                         genai.configure(api_key=primary_key, transport="rest")
                         model = genai.GenerativeModel('gemini-3.5-flash')
                         response = model.generate_content(
                             contents, 
-                            generation_config={"temperature": 0.0, "max_output_tokens": 4096},
-                            request_options={"timeout": 60}
+                            generation_config={"temperature": 0.0, "max_output_tokens": 8192},
+                            request_options={"timeout": 300}  # Safely expanded to 5 minutes to allow full context reading
                         )
                         return response.text.strip()
                     except Exception as e:
                         error_str = str(e)
                         if "429" in error_str or "Quota" in error_str:
-                            time.sleep(5) # Give the server a 5-second rest if we hit the limit
-                        
+                            st.toast("⚠️ Key 1 Quota Hit! Switching to Backup Key...", icon="🔄")
+                            time.sleep(5) # Give the server a rest before swapping keys
+                        else:
+                            st.toast(f"⚠️ Error: {error_str}. Switching to Backup Key...", icon="🔄")
+                            
                         genai.configure(api_key=backup_key, transport="rest")
                         model = genai.GenerativeModel('gemini-3.5-flash')
                         response = model.generate_content(
                             contents, 
-                            generation_config={"temperature": 0.0, "max_output_tokens": 4096},
-                            request_options={"timeout": 60}
+                            generation_config={"temperature": 0.0, "max_output_tokens": 8192},
+                            request_options={"timeout": 300}
                         )
                         return response.text.strip()
 
                 dfs = []
-                # FIX: Throttled to max 2 simultaneous workers to prevent hitting the Burst limit
-                with concurrent.futures.ThreadPoolExecutor(max_workers=2) as executor:
-                    futures = []
-                    for page in image_parts:
-                        futures.append(executor.submit(process_single_page, page, api_key_1, api_key_2, ai_prompt))
-                        time.sleep(1) # Traffic light: Staggers each page by 1 second to pace the requests
-                    
-                    for future in concurrent.futures.as_completed(futures):
-                        csv_result = future.result()
-                        if csv_result:
-                            try:
-                                dfs.append(pd.read_csv(io.StringIO(clean_ai_csv(csv_result)), on_bad_lines='skip'))
-                            except Exception:
-                                pass
+                # Execute the proven V1 "Single Bundle" method
+                csv_result = process_full_bundle(image_parts, api_key_1, api_key_2, ai_prompt)
+                
+                if csv_result:
+                    try:
+                        dfs.append(pd.read_csv(io.StringIO(clean_ai_csv(csv_result)), on_bad_lines='skip'))
+                    except Exception:
+                        pass
 
                 if dfs:
                     df_final = pd.concat(dfs, ignore_index=True)
