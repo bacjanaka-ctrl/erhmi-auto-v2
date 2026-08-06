@@ -46,22 +46,22 @@ FORM_CONFIGS = {
             Carefully read the handwritten and printed numbers from the attached images of the health report.
             
             CRITICAL INSTRUCTION - TARGET MONTH: 
-            The images may contain a ledger with data for multiple months. 
             You MUST ONLY extract the data for the month of {target_timeframe_text}. 
             Ignore data from any other months, and completely ignore obsolete data before 2025.
             
             HOW TO FIND THE MONTH:
             The months are labeled at the top of the columns with a SINGLE LETTER (J, F, M, A, M, J, J, A, S, O, N, D).
-            Look for the column labeled '{target_month_letter}'. Completely ignore 'Quarter' or 'Q' columns (e.g., Q1, Q2, Q3, Q4).
+            For {target_timeframe_text}, look strictly at column number {target_month_num} from left to right (labeled '{target_month_letter}').
+            IMPORTANT: Completely ignore 'Quarter' or 'Q' columns (e.g., Q1, Q2, Q3, Q4).
 
             Look at the 'Field_Description' column in the schema below, match the correct data for {target_timeframe_text}, and type the extracted number into the 'Value' column.
 
             STRICT RULES:
             1. Output the final result STRICTLY as raw CSV text. Do NOT wrap it in Markdown formatting blocks (do not use ```csv).
-            2. Keep the DataElement_ID and Category_ID columns exactly as they appear in the schema. Do not alter these codes.
-            3. The final output must have exactly these 4 columns: DataElement_ID, Category_ID, Field_Description, Value.
-            4. Do not omit any rows. Every single row from the blueprint must be in your output.
-            5. If a field is blank, unreadable, or crossed out for {target_timeframe_text}, leave the Value column completely blank. Do NOT write '0' unless there is literally a '0' written on the form.
+            2. The final output must have exactly these 4 columns: DataElement_ID, Category_ID, Field_Description, Value.
+            3. Do not omit any rows. Every single row from the blueprint must be in your output.
+            4. If a field is blank, unreadable, or crossed out for {target_timeframe_text}, leave the Value column COMPLETELY BLANK (e.g., `id,cat,desc,`). Do NOT write '0' unless there is literally a '0' written.
+            5. Do NOT include any conversational text like "Here is the data". Start immediately with the CSV header.
 
             SCHEMA BLUEPRINT (Use this to match IDs):
             {schema_blueprint}
@@ -271,9 +271,16 @@ uploaded_files = st.file_uploader(
 )
 
 def clean_ai_csv(raw_text):
+    # 1. Strip markdown code blocks
     cleaned = raw_text.replace("```csv", "").replace("```", "").strip()
-    if "DataElement_ID" not in cleaned:
+    
+    # 2. SEVERELY AGGRESSIVE GARBAGE FILTER:
+    # If the AI says "Here is the data: \n DataElement_ID...", we chop off the front part!
+    if "DataElement_ID" in cleaned:
+        cleaned = cleaned[cleaned.find("DataElement_ID"):]
+    else:
         cleaned = "DataElement_ID,Category_ID,Field_Description,Value\n" + cleaned
+    
     return cleaned
 
 if uploaded_files:
@@ -333,8 +340,8 @@ if uploaded_files:
                     gc.collect()
                 st.write("✅ Step 2 Complete.")
                 
-                # --- STEP 3: FULL CONTEXT BUNDLE ENGINE (RESTORED FROM V1) ---
-                st.write(f"⏳ Step 3: AI is processing all {len(image_parts)} pages together for maximum context...")
+                # --- STEP 3: FULL CONTEXT BUNDLE ENGINE ---
+                st.write(f"⏳ Step 3: AI is processing all {len(image_parts)} pages together...")
                 
                 if is_annual_form:
                     target_timeframe_text = f"the entire year of {year}"
@@ -367,14 +374,15 @@ if uploaded_files:
                         response = model.generate_content(
                             contents, 
                             generation_config={"temperature": 0.0, "max_output_tokens": 8192},
-                            request_options={"timeout": 300}  # Safely expanded to 5 minutes to allow full context reading
+                            request_options={"timeout": 300}
                         )
                         return response.text.strip()
                     except Exception as e:
                         error_str = str(e)
                         if "429" in error_str or "Quota" in error_str:
-                            st.toast("⚠️ Key 1 Quota Hit! Switching to Backup Key...", icon="🔄")
-                            time.sleep(5) # Give the server a rest before swapping keys
+                            # FULL 35-SECOND REST TO CLEAR GOOGLE'S EXACT PENALTY TIMER
+                            st.toast("⚠️ Key 1 Quota Hit! Waiting 35s for Google to clear penalty...", icon="⏳")
+                            time.sleep(35) 
                         else:
                             st.toast(f"⚠️ Error: {error_str}. Switching to Backup Key...", icon="🔄")
                             
@@ -388,10 +396,14 @@ if uploaded_files:
                         return response.text.strip()
 
                 dfs = []
-                # Execute the proven V1 "Single Bundle" method
                 csv_result = process_full_bundle(image_parts, api_key_1, api_key_2, ai_prompt)
                 
+                # NEW FEATURE: The Debug Expander! 
+                # If you get 0 records, open this to see EXACTLY what the AI generated.
                 if csv_result:
+                    with st.expander("🛠️ Debug: View Raw AI Output"):
+                        st.text(csv_result)
+                        
                     try:
                         dfs.append(pd.read_csv(io.StringIO(clean_ai_csv(csv_result)), on_bad_lines='skip'))
                     except Exception:
@@ -403,7 +415,8 @@ if uploaded_files:
                     if 'Value' not in df_final.columns:
                         df_final['Value'] = np.nan
                     
-                    df_final['Value'] = df_final['Value'].replace(r'^\s*$', np.nan, regex=True)
+                    # AGGRESSIVE CLEANUP: Drop AI placeholders like dashes or "None" before removing NaNs
+                    df_final['Value'] = df_final['Value'].replace([r'^\s*$', r'^-$', r'^None$', r'^N/A$', r'^n/a$'], np.nan, regex=True)
                     df_final = df_final.dropna(subset=['Value'])
                     
                     if 'DataElement_ID' in df_final.columns and 'Category_ID' in df_final.columns:
