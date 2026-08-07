@@ -42,26 +42,22 @@ FORM_CONFIGS = {
     "631": {
         "timeframe": "monthly",
         "prompt_template": """
-            Your task is to act as an expert data entry assistant for the Sri Lankan Ministry of Health.
-            Carefully read the handwritten and printed numbers from the attached images of the health report.
+            You are an expert data entry assistant for the Sri Lankan Ministry of Health.
             
             CRITICAL INSTRUCTION - TARGET MONTH: 
-            You MUST ONLY extract the data for the month of {target_timeframe_text}. 
-            Ignore data from any other months, and completely ignore obsolete data before 2025.
+            You MUST ONLY extract data for the month of {target_timeframe_text}. 
             
-            HOW TO FIND THE MONTH:
-            The months are labeled at the top of the columns with a SINGLE LETTER (J, F, M, A, M, J, J, A, S, O, N, D).
-            For {target_timeframe_text}, look strictly at column number {target_month_num} from left to right (labeled '{target_month_letter}').
-            IMPORTANT: Completely ignore 'Quarter' or 'Q' columns (e.g., Q1, Q2, Q3, Q4).
-
-            Look at the 'Field_Description' column in the schema below, match the correct data for {target_timeframe_text}, and type the extracted number into the 'Value' column.
-
+            HOW TO READ THIS LEDGER BOOK:
+            1. First, locate the correct column for {target_timeframe_text}. The months are labeled with SINGLE LETTERS (J, F, M, A, M, J, J, A, S, O, N, D) at the top. Look for the correct letter.
+            2. Completely ignore 'Quarter' or 'Q' columns (e.g., Q1, Q2, Q3, Q4).
+            3. SCAN DOWN THAT COLUMN: Whenever you see a handwritten number in that month's column, trace your eyes left to read the row's printed label.
+            4. Find the exact matching 'Field_Description' in the schema below, and output the exact IDs and the number.
+            
             STRICT RULES:
-            1. Output the final result STRICTLY as raw CSV text. Do NOT wrap it in Markdown formatting blocks (do not use ```csv).
-            2. The final output must have exactly these 4 columns: DataElement_ID, Category_ID, Field_Description, Value.
-            3. Do not omit any rows. Every single row from the blueprint must be in your output.
-            4. If a field is blank, unreadable, or crossed out for {target_timeframe_text}, leave the Value column COMPLETELY BLANK (e.g., `id,cat,desc,`). Do NOT write '0' unless there is literally a '0' written.
-            5. Do NOT include any conversational text like "Here is the data". Start immediately with the CSV header.
+            1. Output STRICTLY as raw CSV text. Do NOT wrap it in Markdown formatting blocks (do not use ```csv).
+            2. The output MUST contain exactly 4 columns: DataElement_ID, Category_ID, Field_Description, Value.
+            3. OMIT BLANKS TO SAVE TOKENS: ONLY output rows where you found a visible handwritten number for {target_timeframe_text}. If a row is blank or has a dash for that month, DO NOT output that row at all. Skip it completely!
+            4. Do NOT include any conversational text like "Here is the data". Start immediately with the CSV header.
 
             SCHEMA BLUEPRINT (Use this to match IDs):
             {schema_blueprint}
@@ -132,7 +128,6 @@ FORM_CONFIGS = {
         """
     }
 }
-
 # ==========================================
 # 🔒 SECURE KEY MATCHER
 # ==========================================
