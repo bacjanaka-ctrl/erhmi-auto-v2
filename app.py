@@ -53,11 +53,11 @@ FORM_CONFIGS = {
             3. SCAN DOWN THAT COLUMN: Whenever you see a handwritten number in that month's column, trace your eyes left to read the row's printed label.
             4. Find the exact matching 'Field_Description' in the schema below, and output the exact IDs and the number.
             
-            STRICT RULES:
-            1. Output STRICTLY as raw CSV text. Do NOT wrap it in Markdown formatting blocks (do not use ```csv).
-            2. The output MUST contain exactly 4 columns: DataElement_ID, Category_ID, Field_Description, Value.
-            3. OMIT BLANKS TO SAVE TOKENS: ONLY output rows where you found a visible handwritten number for {target_timeframe_text}. If a row is blank or has a dash for that month, DO NOT output that row at all. Skip it completely!
-            4. Do NOT include any conversational text like "Here is the data". Start immediately with the CSV header.
+            STRICT RULES (CRITICAL FOR SYSTEM PARSING):
+            1. NO REASONING OR CHIT-CHAT: Do NOT show your work, do NOT explain your steps, and do NOT say "Here is the data". 
+            2. Output STRICTLY as raw CSV text. The VERY FIRST text you generate MUST be the exact word: DataElement_ID
+            3. The output MUST contain exactly 4 columns: DataElement_ID, Category_ID, Field_Description, Value.
+            4. OMIT BLANKS TO SAVE MEMORY: ONLY output rows where you found a visible handwritten number for {target_timeframe_text}. If a row is blank or has a dash for that month, DO NOT output that row at all. Skip it completely!
 
             SCHEMA BLUEPRINT (Use this to match IDs):
             {schema_blueprint}
@@ -98,10 +98,11 @@ FORM_CONFIGS = {
             6. SYMBOLS: Checkmark (✓) = 1. Dash (-) or blank = DO NOT output.
 
             STRICT RULES:
-            1. Output STRICTLY as raw CSV text. No markdown blocks (do not use ```csv).
-            2. The output MUST contain exactly 4 columns separated by commas. 
-            3. STRICT ID MATCHING: The 'DataElement_ID' and 'Category_ID' must be exactly 11 characters. NEVER invent ID strings.
-            4. OMIT BLANKS: ONLY output rows where you found a visible handwritten number or checkmark on the assigned pages. 
+            1. NO REASONING OR CHIT-CHAT: Do NOT show your work, do NOT explain your steps, and do NOT say "Here is the data".
+            2. Output STRICTLY as raw CSV text. The VERY FIRST text you generate MUST be the exact word: DataElement_ID
+            3. The output MUST contain exactly 4 columns separated by commas. 
+            4. STRICT ID MATCHING: The 'DataElement_ID' and 'Category_ID' must be exactly 11 characters. NEVER invent ID strings.
+            5. OMIT BLANKS: ONLY output rows where you found a visible handwritten number or checkmark on the assigned pages. 
 
             SCHEMA BLUEPRINT (Use this to match IDs):
             {schema_blueprint}
@@ -118,10 +119,11 @@ FORM_CONFIGS = {
             Extract the number written directly next to, below, or inside the box for that specific label.
 
             STRICT RULES:
-            1. Output STRICTLY as raw CSV text. No markdown blocks (do not use ```csv).
-            2. The output MUST contain exactly 4 columns separated by commas. 
-            3. STRICT ID MATCHING: The 'DataElement_ID' and 'Category_ID' must be exactly 11 characters. NEVER invent ID strings.
-            4. OMIT BLANKS: ONLY output rows where you found a visible handwritten number or checkmark on the assigned pages. 
+            1. NO REASONING OR CHIT-CHAT: Do NOT show your work, do NOT explain your steps, and do NOT say "Here is the data".
+            2. Output STRICTLY as raw CSV text. The VERY FIRST text you generate MUST be the exact word: DataElement_ID
+            3. The output MUST contain exactly 4 columns separated by commas. 
+            4. STRICT ID MATCHING: The 'DataElement_ID' and 'Category_ID' must be exactly 11 characters. NEVER invent ID strings.
+            5. OMIT BLANKS: ONLY output rows where you found a visible handwritten number or checkmark on the assigned pages. 
 
             SCHEMA BLUEPRINT (Use this to match IDs):
             {schema_blueprint}
