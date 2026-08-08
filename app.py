@@ -130,6 +130,7 @@ FORM_CONFIGS = {
         """
     }
 }
+
 # ==========================================
 # 🔒 SECURE KEY MATCHER
 # ==========================================
@@ -268,16 +269,11 @@ uploaded_files = st.file_uploader(
 )
 
 def clean_ai_csv(raw_text):
-    # 1. Strip markdown code blocks
     cleaned = raw_text.replace("```csv", "").replace("```", "").strip()
-    
-    # 2. SEVERELY AGGRESSIVE GARBAGE FILTER:
-    # If the AI says "Here is the data: \n DataElement_ID...", we chop off the front part!
     if "DataElement_ID" in cleaned:
         cleaned = cleaned[cleaned.find("DataElement_ID"):]
     else:
         cleaned = "DataElement_ID,Category_ID,Field_Description,Value\n" + cleaned
-    
     return cleaned
 
 if uploaded_files:
@@ -290,11 +286,15 @@ if uploaded_files:
 
     if st.button("✨ Extract Data via Full Context Engine", type="primary", use_container_width=True):
         
-        api_key_1 = get_api_key("GEMINI_API_KEY_1")
-        api_key_2 = get_api_key("GEMINI_API_KEY_2")
+        # --- NEW: INFINITE KEY POOL LOADER ---
+        api_keys = []
+        for i in range(1, 21):  # Scans for up to 20 keys automatically!
+            key = get_api_key(f"GEMINI_API_KEY_{i}")
+            if key:
+                api_keys.append(key)
         
-        if not api_key_1 or not api_key_2:
-            st.error("❌ CRITICAL ERROR: Streamlit API Keys are missing. Please check your st.secrets configuration.")
+        if not api_keys:
+            st.error("❌ CRITICAL ERROR: No Streamlit API Keys found. Please check your st.secrets configuration.")
             st.stop()
 
         with st.status("🤖 Initiating AI Pipeline...", expanded=True) as status:
@@ -363,40 +363,39 @@ if uploaded_files:
                     schema_blueprint=schema_blueprint
                 )
 
-                def process_full_bundle(stack, primary_key, backup_key, prompt):
+                def process_full_bundle(stack, keys_list, prompt):
                     contents = stack + [prompt]
-                    try:
-                        genai.configure(api_key=primary_key, transport="rest")
-                        model = genai.GenerativeModel('gemini-3.5-flash')
-                        response = model.generate_content(
-                            contents, 
-                            generation_config={"temperature": 0.0, "max_output_tokens": 8192},
-                            request_options={"timeout": 300}
-                        )
-                        return response.text.strip()
-                    except Exception as e:
-                        error_str = str(e)
-                        if "429" in error_str or "Quota" in error_str:
-                            # FULL 35-SECOND REST TO CLEAR GOOGLE'S EXACT PENALTY TIMER
-                            st.toast("⚠️ Key 1 Quota Hit! Waiting 35s for Google to clear penalty...", icon="⏳")
-                            time.sleep(35) 
-                        else:
-                            st.toast(f"⚠️ Error: {error_str}. Switching to Backup Key...", icon="🔄")
+                    # Dynamically loops through every available key until one succeeds
+                    for idx, api_key in enumerate(keys_list):
+                        try:
+                            genai.configure(api_key=api_key, transport="rest")
+                            model = genai.GenerativeModel('gemini-3.5-flash')
+                            response = model.generate_content(
+                                contents, 
+                                generation_config={"temperature": 0.0, "max_output_tokens": 8192},
+                                request_options={"timeout": 300}
+                            )
+                            return response.text.strip()
+                        except Exception as e:
+                            error_str = str(e)
+                            is_last_key = (idx == len(keys_list) - 1)
                             
-                        genai.configure(api_key=backup_key, transport="rest")
-                        model = genai.GenerativeModel('gemini-3.5-flash')
-                        response = model.generate_content(
-                            contents, 
-                            generation_config={"temperature": 0.0, "max_output_tokens": 8192},
-                            request_options={"timeout": 300}
-                        )
-                        return response.text.strip()
+                            if "429" in error_str or "Quota" in error_str:
+                                if not is_last_key:
+                                    st.toast(f"⚠️ Key {idx+1} Quota Hit! Switching to Key {idx+2}...", icon="🔄")
+                                    time.sleep(2)
+                                else:
+                                    st.toast("🚨 ALL API KEYS EXHAUSTED! Please wait 1 minute before trying again.", icon="🛑")
+                                    raise Exception("All API keys reached their quota limits.")
+                            else:
+                                if not is_last_key:
+                                    st.toast(f"⚠️ Error on Key {idx+1}. Switching to Key {idx+2}...", icon="🔄")
+                                else:
+                                    raise e
 
                 dfs = []
-                csv_result = process_full_bundle(image_parts, api_key_1, api_key_2, ai_prompt)
+                csv_result = process_full_bundle(image_parts, api_keys, ai_prompt)
                 
-                # NEW FEATURE: The Debug Expander! 
-                # If you get 0 records, open this to see EXACTLY what the AI generated.
                 if csv_result:
                     with st.expander("🛠️ Debug: View Raw AI Output"):
                         st.text(csv_result)
@@ -412,7 +411,6 @@ if uploaded_files:
                     if 'Value' not in df_final.columns:
                         df_final['Value'] = np.nan
                     
-                    # AGGRESSIVE CLEANUP: Drop AI placeholders like dashes or "None" before removing NaNs
                     df_final['Value'] = df_final['Value'].replace([r'^\s*$', r'^-$', r'^None$', r'^N/A$', r'^n/a$'], np.nan, regex=True)
                     df_final = df_final.dropna(subset=['Value'])
                     
